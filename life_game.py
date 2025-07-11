@@ -380,7 +380,8 @@ def main() -> None:
         metavar="N",
         help=(
             "Dead if the live-cell count shows no new value for N consecutive\n"
-            "generations (0 to disable)\n"
+            "generations (0 to disable).\n"
+            "A value of 5 or greater is recommended for reliable detection.\n"
             "WARNING: This feature may cause any active game to be terminated\n"
         ),
     )
@@ -397,30 +398,49 @@ def main() -> None:
         help="Character for a dead cell. Must be a single character.\n"
     )
 
-    args = parser.parse_args()
+    # All argument parsing and pre-run logic is wrapped in a try block
+    # to gracefully handle KeyboardInterrupt (Ctrl+C) during setup.
+    try:
+        args = parser.parse_args()
 
-    if len(args.live_cell) != 1:
-        sys.exit("Error: --live-cell must be a single character.")
-    if len(args.dead_cell) != 1:
-        sys.exit("Error: --dead-cell must be a single character.")
+        if len(args.live_cell) != 1:
+            sys.exit("Error: --live-cell must be a single character.")
+        if len(args.dead_cell) != 1:
+            sys.exit("Error: --dead-cell must be a single character.")
 
-    # Override size with current terminal dimensions if requested
-    if args.max:
-        term_size = shutil.get_terminal_size(fallback=(80, 24))  # (columns, lines)
-        # Reserve three lines for the header and separator
-        args.rows = max(1, term_size.lines - 4)
-        args.cols = max(1, term_size.columns)
+        # --- Stagnate value validation ---
+        effective_stagnate = args.stagnate
+        if 0 < args.stagnate < 5:
+            print(
+                f"Warning: --stagnate value of {args.stagnate} is too low for reliable cycle detection.",
+                file=sys.stderr
+            )
+            print("         Setting to the minimum of 5.", file=sys.stderr)
+            print("         Starting in 5 seconds... (Press Ctrl+C to cancel)", file=sys.stderr)
+            effective_stagnate = 5
+            time.sleep(5)
 
-    run(
-        rows=args.rows,
-        cols=args.cols,
-        density=args.density,
-        interval=args.interval,
-        endless=args.endless,
-        stagnate_limit=args.stagnate if args.stagnate > 0 else None,
-        live_cell=args.live_cell,
-        dead_cell=args.dead_cell,
-    )
+        # Override size with current terminal dimensions if requested
+        if args.max:
+            term_size = shutil.get_terminal_size(fallback=(80, 24))  # (columns, lines)
+            # Reserve three lines for the header and separator
+            args.rows = max(1, term_size.lines - 4)
+            args.cols = max(1, term_size.columns)
+
+        run(
+            rows=args.rows,
+            cols=args.cols,
+            density=args.density,
+            interval=args.interval,
+            endless=args.endless,
+            stagnate_limit=effective_stagnate if effective_stagnate > 0 else None,
+            live_cell=args.live_cell,
+            dead_cell=args.dead_cell,
+        )
+    except KeyboardInterrupt:
+        # Catch Ctrl+C during the argument parsing or the 5-second wait
+        print("\nInterrupted during setup. Exiting.", file=sys.stderr)
+        sys.exit(0)
 
 
 if __name__ == "__main__":
