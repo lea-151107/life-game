@@ -133,6 +133,7 @@ def run(
        'stagnate_limit' generations.
     """
     game_no = 1
+    max_generation = 0
     board = create_board(rows, cols, density)
     generation = 0
     history: Optional[Deque[int]] = (
@@ -157,6 +158,11 @@ def run(
                     stagnated = True
 
             if alive == 0 or stagnated:
+                effective_generation = generation
+                if stagnated and stagnate_limit is not None:
+                    effective_generation -= stagnate_limit
+                max_generation = max(max_generation, effective_generation)
+
                 if endless:
                     time.sleep(interval)  # Wait before restarting
                     game_no += 1
@@ -171,6 +177,9 @@ def run(
                     else "Stagnation or two-value oscillation detected."
                 )
                 print(f"{reason} Exiting.")
+                print("\n--- Results ---")
+                print(f"Final Game: {game_no}")
+                print(f"Max Generation: {max_generation}")
                 break
 
             # Append current state to history before waiting
@@ -194,6 +203,7 @@ def run(
                         key_pressed_r = True
 
             if key_pressed_r:
+                max_generation = max(max_generation, generation)
                 game_no += 1
                 board = create_board(rows, cols, density)
                 generation = 0
@@ -205,7 +215,11 @@ def run(
             board = next_generation(board)
             generation += 1
     except KeyboardInterrupt:
+        max_generation = max(max_generation, generation)
         print("\nInterrupted by user. Goodbye!")
+        print("\n--- Results ---")
+        print(f"Final Game: {game_no}")
+        print(f"Max Generation: {max_generation}")
     finally:
         if os.name != "nt":
             # Restore terminal settings
