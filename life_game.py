@@ -3,12 +3,14 @@
 Terminal Conway's Game of Life
 ──────────────────────────────
  - Adjustable rows, columns, initial density, and generation interval via CLI.
+ - Use --max to fit the board to the current terminal window.
  - Press Ctrl-C to quit at any time.
 """
 
 import argparse
 import os
 import random
+import shutil
 import time
 from typing import List
 
@@ -103,8 +105,20 @@ def main() -> None:
     parser.add_argument(
         "-i", "--interval", type=float, default=0.2, help="Delay between generations (seconds)"
     )
+    parser.add_argument(
+        "--max",
+        action="store_true",
+        help="Fit board to current terminal size (overrides rows and columns)",
+    )
 
     args = parser.parse_args()
+
+    # Override with current terminal size if --max is set
+    if args.max:
+        term_size = shutil.get_terminal_size(fallback=(80, 24))  # (columns, lines)
+        # Reserve 3 lines for header and separator; avoid zero or negative sizes
+        args.rows = max(1, term_size.lines - 3)
+        args.cols = max(1, term_size.columns)
     run(args.rows, args.cols, args.density, args.interval)
 
 
