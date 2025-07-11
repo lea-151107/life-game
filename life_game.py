@@ -8,6 +8,7 @@ Options
 --endless    : Restart automatically with a fresh board when a Dead condition is met.
 --stagnate N : Mark as Dead if the live-cell count shows no new value for N generations
                (either all identical or an A-B-A-B… two-value alternation).
+Press 'R' to restart the game.
 Press Ctrl-C to quit at any time.
 """
 
@@ -15,9 +16,18 @@ import argparse
 import os
 import random
 import shutil
+import sys
 import time
 from collections import deque
 from typing import Deque, List, Optional
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import select
+    import termios
+    import tty
+
 
 CellGrid = List[List[bool]]  # True = alive, False = dead
 
@@ -77,16 +87,31 @@ def create_board(rows: int, cols: int, density: float) -> CellGrid:
     return [[random.random() < density for _ in range(cols)] for _ in range(rows)]
 
 
-def two_value_alternation(seq: List[int]) -> bool:
+def is_cyclical(seq: List[int]) -> bool:
     """
-    Return True if 'seq' alternates between exactly two distinct values (A-B-A-B…).
-    Assumes len(seq) >= 2.
+    Return True if `seq` is composed of a repeating sub-pattern (e.g., A-B-A-B, A-B-C-A-B-C).
+    Handles cycles of any length, regardless of the total sequence length.
     """
-    if len(set(seq)) != 2:
+    n = len(seq)
+    # To confirm a cycle of length k, we need at least 2k elements.
+    # We check for cycles up to length n/2.
+    # A minimum of 4 elements is required to robustly detect a cycle of length 1 or 2.
+    if n < 4:
         return False
-    even_vals = {seq[i] for i in range(0, len(seq), 2)}
-    odd_vals = {seq[i] for i in range(1, len(seq), 2)}
-    return len(even_vals) == len(odd_vals) == 1 and even_vals != odd_vals
+
+    # k is the potential cycle length
+    for k in range(1, n // 2 + 1):
+        is_cycle = True
+        # Check if the sequence is consistent with a cycle of length k.
+        # We do this by checking if every element is the same as the element k positions before it.
+        for i in range(k, n):
+            if seq[i] != seq[i - k]:
+                is_cycle = False
+                break
+        if is_cycle:
+            # The smallest k that fits the pattern is the cycle length.
+            return True
+    return False
 
 
 # ──────────────────────────────────────────────────────────────
@@ -104,9 +129,8 @@ def run(
     Dead conditions
     ---------------
     1. The number of live cells becomes zero.
-    2. The live-cell count shows no new value for 'stagnate_limit' generations, i.e.:
-       a) all values identical, or
-       b) an A-B-A-B… two-value alternation.
+    2. The live-cell count enters a repeating cycle (of any length) for
+       'stagnate_limit' generations.
     """
     game_no = 1
     board = create_board(rows, cols, density)
@@ -114,6 +138,11 @@ def run(
     history: Optional[Deque[int]] = (
         deque(maxlen=stagnate_limit) if stagnate_limit else None
     )
+
+    if os.name != "nt":
+        # Set up terminal for non-blocking input on Unix-like systems
+        old_settings = termios.tcgetattr(sys.stdin)
+        tty.setcbreak(sys.stdin.fileno())
 
     try:
         while True:
@@ -124,14 +153,12 @@ def run(
             # Dead condition check
             stagnated = False
             if history is not None and len(history) == history.maxlen:
-                if len(set(history)) == 1:
-                    stagnated = True
-                elif two_value_alternation(list(history)):
+                if is_cyclical(list(history)):
                     stagnated = True
 
             if alive == 0 or stagnated:
                 if endless:
-                    time.sleep(interval)
+                    time.sleep(interval)  # Wait before restarting
                     game_no += 1
                     board = create_board(rows, cols, density)
                     generation = 0
@@ -146,14 +173,43 @@ def run(
                 print(f"{reason} Exiting.")
                 break
 
-            # Proceed to next generation
+            # Append current state to history before waiting
             if history is not None:
                 history.append(alive)
-            time.sleep(interval)
+
+            # Non-blocking wait for interval, checking for 'R' key
+            key_pressed_r = False
+            if os.name == "nt":
+                start_time = time.time()
+                while time.time() - start_time < interval:
+                    if msvcrt.kbhit():
+                        if msvcrt.getch().lower() == b"r":
+                            key_pressed_r = True
+                            break
+                    time.sleep(0.01)
+            else:  # Unix-like
+                rlist, _, _ = select.select([sys.stdin], [], [], interval)
+                if rlist:
+                    if sys.stdin.read(1).lower() == "r":
+                        key_pressed_r = True
+
+            if key_pressed_r:
+                game_no += 1
+                board = create_board(rows, cols, density)
+                generation = 0
+                if history is not None:
+                    history.clear()
+                continue
+
+            # Proceed to next generation
             board = next_generation(board)
             generation += 1
     except KeyboardInterrupt:
         print("\nInterrupted by user. Goodbye!")
+    finally:
+        if os.name != "nt":
+            # Restore terminal settings
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
 
 def main() -> None:
@@ -182,7 +238,7 @@ def main() -> None:
     parser.add_argument(
         "--stagnate",
         type=int,
-        default=10,
+        default=0,
         metavar="N",
         help=(
             "Dead if the live-cell count shows no new value for N consecutive "
@@ -195,7 +251,7 @@ def main() -> None:
     # Override size with current terminal dimensions if requested
     if args.max:
         term_size = shutil.get_terminal_size(fallback=(80, 24))  # (columns, lines)
-        # Reserve 4 lines for header and separator; avoid zero or negative sizes
+        # Reserve three lines for the header and separator
         args.rows = max(1, term_size.lines - 4)
         args.cols = max(1, term_size.columns)
 
