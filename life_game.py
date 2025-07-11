@@ -225,29 +225,49 @@ def run(
             # Restore terminal settings
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
+class ArgmentHelpFormatter_(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter): pass
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Console version of Conway's Game of Life",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument("-r", "--rows", type=int, default=20, help="Number of rows")
-    parser.add_argument("-c", "--cols", type=int, default=40, help="Number of columns")
-    parser.add_argument(
-        "-d", "--density", type=float, default=0.2, help="Initial live-cell density (0–1)"
+        formatter_class=ArgmentHelpFormatter_
     )
     parser.add_argument(
-        "-i", "--interval", type=float, default=0.2, help="Delay between generations (seconds)"
+        "-r",
+        "--rows",
+        type=int,
+        default=20,
+        help="Number of rows\n"
+    )
+    parser.add_argument(
+        "-c",
+        "--cols",
+        type=int,
+        default=40,
+        help="Number of columns\n"
+    )
+    parser.add_argument(
+        "-d",
+        "--density",
+        type=float,
+        default=0.2,
+        help="Initial live-cell density (0–1)\n"
+    )
+    parser.add_argument(
+        "-i", "--interval",
+        type=float,
+        default=0.2,
+        help="Delay between generations (seconds)\n"
     )
     parser.add_argument(
         "--max",
         action="store_true",
-        help="Fit the board to the current terminal size (overrides rows and columns)",
+        help="Fit the board to the current terminal size (overrides rows and columns)\n",
     )
     parser.add_argument(
         "--endless",
         action="store_true",
-        help="Restart automatically with a fresh board when a Dead condition is met",
+        help="Restart automatically with a fresh board when a Dead condition is met\n",
     )
     parser.add_argument(
         "--stagnate",
@@ -255,8 +275,9 @@ def main() -> None:
         default=0,
         metavar="N",
         help=(
-            "Dead if the live-cell count shows no new value for N consecutive "
-            "generations (0 to disable)"
+            "Dead if the live-cell count shows no new value for N consecutive\n"
+            "generations (0 to disable)\n"
+            "WARNING: This feature may cause any active game to be terminated\n"
         ),
     )
 
