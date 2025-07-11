@@ -60,22 +60,18 @@ def next_generation(board: CellGrid) -> CellGrid:
 # ──────────────────────────────────────────────────────────────
 #  Rendering
 # ──────────────────────────────────────────────────────────────
-LIVE_CELL = "■"     # Change to "*" if your terminal does not support the full-width block
-DEAD_CELL = " "     # Dead cell is rendered as whitespace
-
-
 def clear_screen() -> None:
     """Clear the entire terminal window."""
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def render(board: CellGrid, generation: int, game_no: int, alive: int) -> None:
+def render(board: CellGrid, generation: int, game_no: int, alive: int, live_cell: str, dead_cell: str) -> None:
     """Render the current board state to the terminal."""
     header = f"Game {game_no} | Generation {generation} | Alive {alive}"
     print(header)
     print("-" * len(header))
     for row in board:
-        print("".join(LIVE_CELL if cell else DEAD_CELL for cell in row))
+        print("".join(live_cell if cell else dead_cell for cell in row))
     print(flush=True)
 
 
@@ -124,6 +120,8 @@ def run(
     interval: float,
     endless: bool,
     stagnate_limit: Optional[int],
+    live_cell: str,
+    dead_cell: str,
 ) -> None:
     """
     Dead conditions
@@ -149,7 +147,7 @@ def run(
         while True:
             alive = sum(cell for row in board for cell in row)
             clear_screen()
-            render(board, generation, game_no, alive)
+            render(board, generation, game_no, alive, live_cell, dead_cell)
 
             # Dead condition check
             stagnated = False
@@ -280,8 +278,25 @@ def main() -> None:
             "WARNING: This feature may cause any active game to be terminated\n"
         ),
     )
+    parser.add_argument(
+        "--live-cell",
+        type=str,
+        default="■",
+        help="Character for a live cell. Must be a single character.\n"
+    )
+    parser.add_argument(
+        "--dead-cell",
+        type=str,
+        default=" ",
+        help="Character for a dead cell. Must be a single character.\n"
+    )
 
     args = parser.parse_args()
+
+    if len(args.live_cell) != 1:
+        sys.exit("Error: --live-cell must be a single character.")
+    if len(args.dead_cell) != 1:
+        sys.exit("Error: --dead-cell must be a single character.")
 
     # Override size with current terminal dimensions if requested
     if args.max:
@@ -297,6 +312,8 @@ def main() -> None:
         interval=args.interval,
         endless=args.endless,
         stagnate_limit=args.stagnate if args.stagnate > 0 else None,
+        live_cell=args.live_cell,
+        dead_cell=args.dead_cell,
     )
 
 
