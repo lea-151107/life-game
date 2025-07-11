@@ -333,7 +333,7 @@ class ArgmentHelpFormatter_(argparse.ArgumentDefaultsHelpFormatter, argparse.Raw
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Console version of Conway's Game of Life",
+        description="Console version of Conway's Game of Life.",
         formatter_class=ArgmentHelpFormatter_
     )
     parser.add_argument(
@@ -341,37 +341,37 @@ def main() -> None:
         "--rows",
         type=int,
         default=20,
-        help="Number of rows\n"
+        help="Number of rows.\n"
     )
     parser.add_argument(
         "-c",
         "--cols",
         type=int,
         default=40,
-        help="Number of columns\n"
+        help="Number of columns.\n"
     )
     parser.add_argument(
         "-d",
         "--density",
         type=float,
         default=0.2,
-        help="Initial live-cell density (0–1)\n"
+        help="Initial live-cell density (0–1).\n"
     )
     parser.add_argument(
         "-i", "--interval",
         type=float,
         default=0.2,
-        help="Delay between generations (seconds)\n"
+        help="Delay between generations (seconds).\n"
     )
     parser.add_argument(
         "--max",
         action="store_true",
-        help="Fit the board to the current terminal size (overrides rows and columns)\n",
+        help="Fit the board to the current terminal size (overrides rows and columns).\n",
     )
     parser.add_argument(
         "--endless",
         action="store_true",
-        help="Restart automatically with a fresh board when a Dead condition is met\n",
+        help="Restart automatically with a fresh board when a Dead condition is met.\n",
     )
     parser.add_argument(
         "--stagnate",
@@ -382,7 +382,7 @@ def main() -> None:
             "Dead if the live-cell count shows no new value for N consecutive\n"
             "generations (0 to disable).\n"
             "A value of 5 or greater is recommended for reliable detection.\n"
-            "WARNING: This feature may cause any active game to be terminated\n"
+            "WARNING: This feature may cause any active game to be terminated.\n"
         ),
     )
     parser.add_argument(
