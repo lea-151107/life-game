@@ -65,9 +65,62 @@ def clear_screen() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def render(board: CellGrid, generation: int, game_no: int, alive: int, live_cell: str, dead_cell: str) -> None:
-    """Render the current board state to the terminal."""
-    header = f"Game {game_no} | Generation {generation} | Alive {alive}"
+def render(
+    board: CellGrid,
+    generation: int,
+    game_no: int,
+    alive: int,
+    live_cell: str,
+    dead_cell: str,
+    rows: int,
+    cols: int,
+    interval: float,
+    endless: bool,
+    stagnate_limit: Optional[int],
+    density: float,
+    fps: float,
+    alive_delta: int,
+) -> None:
+    """Render the current board state to the terminal with a detailed header."""
+    # --- Header Construction ---
+    mode_parts = []
+    if endless:
+        mode_parts.append("[Endless]")
+    if stagnate_limit is not None:
+        mode_parts.append(f"[Stagnate: {stagnate_limit}]")
+    
+    prefix_parts = [
+        f"Size: {cols}x{rows}",
+        f"Interval: {interval}s",
+    ]
+
+    # Format the 'Alive' part with its delta
+    alive_str = f"Alive {alive}"
+    if generation > 0:
+        alive_str += f" (Δ:{alive_delta:+})" # Show sign for delta (+/-)
+
+    core_parts = [
+        f"Game {game_no}",
+        f"Generation {generation}",
+        alive_str,
+    ]
+
+    suffix_parts = [
+        f"Density: {density:.1f}%",
+        f"FPS: {fps:.1f}",
+    ]
+
+    # Join all parts into a single header string
+    full_header_list = []
+    if mode_parts:
+        full_header_list.append(" ".join(mode_parts))
+    full_header_list.extend(prefix_parts)
+    full_header_list.extend(core_parts)
+    full_header_list.extend(suffix_parts)
+    
+    header = " | ".join(full_header_list)
+
+    # --- Rendering ---
     print(header)
     print("-" * len(header))
     for row in board:
@@ -75,9 +128,31 @@ def render(board: CellGrid, generation: int, game_no: int, alive: int, live_cell
     print(flush=True)
 
 
+def render_results(game_no: int, max_generation: int) -> None:
+    """Render the final results in a formatted box."""
+    title = "Game Over"
+    stats = [
+        f"Final Game: {game_no}",
+        f"Max Generation: {max_generation}",
+    ]
+
+    # Determine the width of the box
+    width = max(len(s) for s in stats)
+    width = max(width, len(title))
+
+    print("\n")
+    print(f"┌{'─' * (width + 2)}┐")
+    print(f"│ {title.center(width)} │")
+    print(f"├{'─' * (width + 2)}┤")
+    for stat in stats:
+        print(f"│ {stat.ljust(width)} │")
+    print(f"└{'─' * (width + 2)}┘")
+
+
 # ──────────────────────────────────────────────────────────────
 #  Helpers
 # ──────────────────────────────────────────────────────────────
+
 def create_board(rows: int, cols: int, density: float) -> CellGrid:
     """Generate a new random board."""
     return [[random.random() < density for _ in range(cols)] for _ in range(rows)]
@@ -144,10 +219,43 @@ def run(
         tty.setcbreak(sys.stdin.fileno())
 
     try:
+        last_render_time = time.time()
+        fps = 0.0
+        last_alive_count = 0
+
         while True:
+            # --- Calculations for rendering ---
             alive = sum(cell for row in board for cell in row)
+            alive_delta = alive - last_alive_count
+            density_val = (alive / (rows * cols)) * 100 if (rows * cols) > 0 else 0
+            
+            current_time = time.time()
+            time_delta = current_time - last_render_time
+            if time_delta > 0:
+                fps = 1.0 / time_delta
+            last_render_time = current_time
+
+            # --- Render the board ---
             clear_screen()
-            render(board, generation, game_no, alive, live_cell, dead_cell)
+            render(
+                board,
+                generation,
+                game_no,
+                alive,
+                live_cell,
+                dead_cell,
+                rows,
+                cols,
+                interval,
+                endless,
+                stagnate_limit,
+                density_val,
+                fps,
+                alive_delta,
+            )
+
+            # Update for next iteration
+            last_alive_count = alive
 
             # Dead condition check
             stagnated = False
@@ -166,6 +274,7 @@ def run(
                     game_no += 1
                     board = create_board(rows, cols, density)
                     generation = 0
+                    last_alive_count = 0 # Reset for new game
                     if history is not None:
                         history.clear()
                     continue
@@ -175,9 +284,7 @@ def run(
                     else "Stagnation or two-value oscillation detected."
                 )
                 print(f"{reason} Exiting.")
-                print("\n--- Results ---")
-                print(f"Final Game: {game_no}")
-                print(f"Max Generation: {max_generation}")
+                render_results(game_no, max_generation)
                 break
 
             # Append current state to history before waiting
@@ -205,6 +312,7 @@ def run(
                 game_no += 1
                 board = create_board(rows, cols, density)
                 generation = 0
+                last_alive_count = 0 # Reset for new game
                 if history is not None:
                     history.clear()
                 continue
@@ -215,9 +323,7 @@ def run(
     except KeyboardInterrupt:
         max_generation = max(max_generation, generation)
         print("\nInterrupted by user. Goodbye!")
-        print("\n--- Results ---")
-        print(f"Final Game: {game_no}")
-        print(f"Max Generation: {max_generation}")
+        render_results(game_no, max_generation)
     finally:
         if os.name != "nt":
             # Restore terminal settings
