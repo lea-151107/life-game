@@ -5,6 +5,7 @@
 
 ---
 
+```
 options:
   -h, --help            このヘルプメッセージを表示して終了します
   -r, --rows ROWS       行数を指定します。
@@ -32,5 +33,6 @@ options:
   --dead-cell DEAD_CELL
                         デッドセルを表す文字（1 文字）。
                          （デフォルト:  ）
+```
 
 stagnateはちょっと実験的機能かもしれない
