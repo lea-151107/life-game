@@ -116,8 +116,8 @@ def main() -> None:
     # Override with current terminal size if --max is set
     if args.max:
         term_size = shutil.get_terminal_size(fallback=(80, 24))  # (columns, lines)
-        # Reserve 3 lines for header and separator; avoid zero or negative sizes
-        args.rows = max(1, term_size.lines - 3)
+        # Reserve 4 lines for header and separator; avoid zero or negative sizes
+        args.rows = max(1, term_size.lines - 4)
         args.cols = max(1, term_size.columns)
     run(args.rows, args.cols, args.density, args.interval)
 
