@@ -4,6 +4,7 @@ Terminal Conway's Game of Life
 ──────────────────────────────
  - Adjustable rows, columns, initial density, and generation interval via CLI.
  - Use --max to fit the board to the current terminal window.
+ - Use --endless to restart automatically with a fresh board when all cells die.
  - Press Ctrl-C to quit at any time.
 """
 
@@ -56,10 +57,10 @@ def clear_screen() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def render(board: CellGrid, generation: int) -> None:
+def render(board: CellGrid, generation: int, game_no: int) -> None:
     """Render the current board state to the terminal."""
     alive = sum(cell for row in board for cell in row)
-    header = f"Generation {generation} | Alive {alive}"
+    header = f"Game {game_no} | Generation {generation} | Alive {alive}"
     print(header)
     print("-" * len(header))
     for row in board:
@@ -70,20 +71,32 @@ def render(board: CellGrid, generation: int) -> None:
 # ──────────────────────────────────────────────────────────────
 #  Main loop
 # ──────────────────────────────────────────────────────────────
-def run(rows: int, cols: int, density: float, interval: float) -> None:
-    """Run the simulation until interrupted or all cells die."""
-    # Create an initial board with random live cells
-    board = [[random.random() < density for _ in range(cols)] for _ in range(rows)]
+def create_board(rows: int, cols: int, density: float) -> CellGrid:
+    """Generate a new random board."""
+    return [[random.random() < density for _ in range(cols)] for _ in range(rows)]
 
+
+def run(rows: int, cols: int, density: float, interval: float, endless: bool) -> None:
+    """Run the simulation, optionally restarting automatically when all cells die."""
+    game_no = 1
+    board = create_board(rows, cols, density)
     generation = 0
+
     try:
         while True:
             clear_screen()
-            render(board, generation)
+            render(board, generation, game_no)
 
             if all(not cell for row in board for cell in row):
-                print("All cells are dead. Exiting.")
-                break
+                if endless:
+                    time.sleep(interval)
+                    game_no += 1
+                    board = create_board(rows, cols, density)
+                    generation = 0
+                    continue
+                else:
+                    print("All cells are dead. Exiting.")
+                    break
 
             time.sleep(interval)
             board = next_generation(board)
@@ -110,6 +123,11 @@ def main() -> None:
         action="store_true",
         help="Fit board to current terminal size (overrides rows and columns)",
     )
+    parser.add_argument(
+        "--endless",
+        action="store_true",
+        help="Restart automatically with a fresh board when all cells die",
+    )
 
     args = parser.parse_args()
 
@@ -119,7 +137,8 @@ def main() -> None:
         # Reserve 4 lines for header and separator; avoid zero or negative sizes
         args.rows = max(1, term_size.lines - 4)
         args.cols = max(1, term_size.columns)
-    run(args.rows, args.cols, args.density, args.interval)
+
+    run(args.rows, args.cols, args.density, args.interval, args.endless)
 
 
 if __name__ == "__main__":
