@@ -92,6 +92,9 @@ def render(
     pattern_names: Optional[List[str]] = None,
     current_pattern_data: Optional[Pattern] = None,
     keep_alive: bool = False,
+    pattern_scroll_offset: int = 0,
+    search_mode: bool = False,
+    search_query: str = "",
 ) -> None:
     """Render the current board state to the terminal with a detailed header."""
     # ANSI codes for cursor highlighting
@@ -162,13 +165,25 @@ def render(
     if pattern_selection_mode:
         print("Select a pattern using ↑/↓ arrows, press Space to place it.")
         print("Press 'L' or Esc to cancel.")
-        print("-" * len(header))
+        print("-" * len(header) if header else "-" * 20)
         if pattern_names:
-            for i, name in enumerate(pattern_names):
+            # Calculate how many items can be shown
+            # Subtract lines for header, separator, and instructions
+            header_height = 3 if header else 1 
+            instruction_height = 3
+            max_items = rows - header_height - instruction_height
+            
+            # Get the slice of patterns to display
+            display_patterns = pattern_names[pattern_scroll_offset:pattern_scroll_offset + max_items]
+
+            for i, name in enumerate(display_patterns, start=pattern_scroll_offset):
                 if i == selected_pattern_index:
                     print(f"> {BG_GREEN}{FG_BLACK} {name} {RESET}")
                 else:
                     print(f"  {name}")
+        
+        if search_mode:
+            print(f"\nSearch: /{search_query}_")
         return
 
     ghost_cells = set()
@@ -324,6 +339,9 @@ def run(
     cursor_y, cursor_x = 0, 0
     pattern_names = list(PATTERN_LIBRARY.keys())
     selected_pattern_index = 0
+    pattern_scroll_offset = 0
+    search_mode = False
+    search_query = ""
     current_pattern_data: Optional[Pattern] = None
     pattern_rotation = 0
     pattern_flip = False
@@ -354,8 +372,15 @@ def run(
 
             # --- Prepare pattern for rendering ---
             display_pattern = None
-            if placement_mode:
-                pattern = PATTERN_LIBRARY[pattern_names[selected_pattern_index]]
+            # Filter patterns based on search query for rendering the list
+            if search_query:
+                display_names_for_render = [name for name in pattern_names if search_query.lower() in name.lower()]
+            else:
+                display_names_for_render = pattern_names
+
+            if placement_mode and display_names_for_render:
+                selected_name = display_names_for_render[selected_pattern_index]
+                pattern = PATTERN_LIBRARY[selected_name]
                 if pattern_flip:
                     pattern = flip_pattern(pattern)
                 display_pattern = rotate_pattern(pattern, pattern_rotation)
@@ -385,9 +410,12 @@ def run(
                 pattern_selection_mode,
                 placement_mode,
                 selected_pattern_index,
-                pattern_names,
+                display_names_for_render, # Use filtered list for rendering
                 display_pattern,
                 keep_alive,
+                pattern_scroll_offset,
+                search_mode,
+                search_query,
             )
 
             # Update for next iteration (only if not in edit mode)
@@ -504,17 +532,53 @@ def run(
 
             # --- Pattern Selection Mode ---
             if pattern_selection_mode:
-                if processed_input in ('\x1b[a', repr(b'\xe0H')): # Up
-                    selected_pattern_index = (selected_pattern_index - 1) % len(pattern_names)
-                elif processed_input in ('\x1b[b', repr(b'\xe0P')): # Down
-                    selected_pattern_index = (selected_pattern_index + 1) % len(pattern_names)
-                elif processed_input == ' ': # Spacebar to select
-                    pattern_selection_mode = False
-                    placement_mode = True
-                    pattern_rotation = 0
-                    pattern_flip = False
-                elif processed_input == 'l' or processed_input == '\x1b': # 'l' or Esc
-                    pattern_selection_mode = False
+                # Filter patterns based on search query
+                if search_query:
+                    display_names = [name for name in pattern_names if search_query.lower() in name.lower()]
+                else:
+                    display_names = pattern_names
+
+                # Calculate visible items for scrolling logic
+                header_height = 3 if header_items else 1
+                instruction_height = 3
+                max_items = rows - header_height - instruction_height
+
+                if search_mode:
+                    if processed_input and len(processed_input) == 1 and processed_input.isprintable():
+                        search_query += processed_input
+                    elif processed_input == repr(b'\x7f') or processed_input == repr(b'\x08'): # Backspace
+                        search_query = search_query[:-1]
+                    elif processed_input == '\r' or processed_input == '\n': # Enter
+                        search_mode = False
+                    elif processed_input == '\x1b': # Esc
+                        search_mode = False
+                        search_query = ""
+                    
+                    # Reset selection when query changes
+                    selected_pattern_index = 0
+                    pattern_scroll_offset = 0
+
+                else: # Not in search_mode (i.e., navigating the list)
+                    if processed_input == '/':
+                        search_mode = True
+                        search_query = ""
+                    elif processed_input in ('\x1b[a', repr(b'\xe0H')): # Up
+                        selected_pattern_index = max(0, selected_pattern_index - 1)
+                        if selected_pattern_index < pattern_scroll_offset:
+                            pattern_scroll_offset = selected_pattern_index
+                    elif processed_input in ('\x1b[b', repr(b'\xe0P')): # Down
+                        selected_pattern_index = min(len(display_names) - 1, selected_pattern_index + 1)
+                        if selected_pattern_index >= pattern_scroll_offset + max_items:
+                            pattern_scroll_offset = selected_pattern_index - max_items + 1
+                    elif processed_input == ' ': # Spacebar to select
+                        if display_names:
+                            pattern_selection_mode = False
+                            placement_mode = True
+                            pattern_rotation = 0
+                            pattern_flip = False
+
+                    elif processed_input == 'l' or processed_input == '\x1b': # 'l' or Esc
+                        pattern_selection_mode = False
                 continue
 
             # --- Placement Mode ---
