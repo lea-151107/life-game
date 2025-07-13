@@ -91,6 +91,7 @@ def render(
     selected_pattern_index: int = 0,
     pattern_names: Optional[List[str]] = None,
     current_pattern_data: Optional[Pattern] = None,
+    keep_alive: bool = False,
 ) -> None:
     """Render the current board state to the terminal with a detailed header."""
     # ANSI codes for cursor highlighting
@@ -120,6 +121,8 @@ def render(
 
         if endless:
             mode_str_parts.append("[Endless]")
+        if keep_alive:
+            mode_str_parts.append("[Keep Alive]")
         if stagnate_limit is not None:
             mode_str_parts.append(f"[Stagnate: {stagnate_limit}]")
         if mode_str_parts:
@@ -295,6 +298,7 @@ def run(
     live_cell: str,
     dead_cell: str,
     header_items: str,
+    keep_alive: bool,
 ) -> None:
     """
     Dead conditions
@@ -383,6 +387,7 @@ def run(
                 selected_pattern_index,
                 pattern_names,
                 display_pattern,
+                keep_alive,
             )
 
             # Update for next iteration (only if not in edit mode)
@@ -397,7 +402,7 @@ def run(
                     if is_cyclical(list(history)):
                         stagnated = True
 
-                if alive == 0 or stagnated:
+                if (alive == 0 and not keep_alive) or stagnated:
                     effective_generation = generation
                     if stagnated and stagnate_limit is not None:
                         effective_generation -= stagnate_limit
@@ -621,6 +626,11 @@ def main() -> None:
         help="Restart automatically with a fresh board when a Dead condition is met.\n",
     )
     parser.add_argument(
+        "--keep-alive",
+        action="store_true",
+        help="Prevent the game from ending when all cells are dead.\n",
+    )
+    parser.add_argument(
         "--stagnate",
         type=int,
         default=0,
@@ -710,6 +720,7 @@ def main() -> None:
             live_cell=args.live_cell,
             dead_cell=args.dead_cell,
             header_items=args.header_items,
+            keep_alive=args.keep_alive,
         )
     except KeyboardInterrupt:
         # Catch Ctrl+C during the argument parsing or the 5-second wait
