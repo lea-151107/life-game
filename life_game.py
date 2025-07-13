@@ -80,51 +80,78 @@ def render(
     density: float,
     fps: float,
     alive_delta: int,
+    header_items: str,
+    paused: bool,
+    edit_mode: bool,
+    cursor_y: int,
+    cursor_x: int,
 ) -> None:
     """Render the current board state to the terminal with a detailed header."""
+    # ANSI codes for cursor highlighting
+    BG_CYAN = "\x1b[46m"
+    RESET = "\x1b[0m"
+
     # --- Header Construction ---
-    mode_parts = []
-    if endless:
-        mode_parts.append("[Endless]")
-    if stagnate_limit is not None:
-        mode_parts.append(f"[Stagnate: {stagnate_limit}]")
-    
-    prefix_parts = [
-        f"Size: {cols}x{rows}",
-        f"Interval: {interval}s",
-    ]
+    if not header_items:
+        header_items = "game"
 
-    # Format the 'Alive' part with its delta
-    alive_str = f"Alive {alive}"
-    if generation > 0:
-        alive_str += f" (Δ:{alive_delta:+})" # Show sign for delta (+/-)
+    items_to_show = {item.strip() for item in header_items.lower().split(",")}
+    header_parts = []
 
-    core_parts = [
-        f"Game {game_no}",
-        f"Generation {generation}",
-        alive_str,
-    ]
+    if "mode" in items_to_show:
+        mode_str_parts = []
+        if edit_mode:
+            mode_str_parts.append("[Editing]")
+        elif paused:
+            mode_str_parts.append("[Paused]")
+        if endless:
+            mode_str_parts.append("[Endless]")
+        if stagnate_limit is not None:
+            mode_str_parts.append(f"[Stagnate: {stagnate_limit}]")
+        if mode_str_parts:
+            header_parts.append(" ".join(mode_str_parts))
 
-    suffix_parts = [
-        f"Density: {density:.1f}%",
-        f"FPS: {fps:.1f}",
-    ]
+    if "size" in items_to_show:
+        header_parts.append(f"Size: {cols}x{rows}")
 
-    # Join all parts into a single header string
-    full_header_list = []
-    if mode_parts:
-        full_header_list.append(" ".join(mode_parts))
-    full_header_list.extend(prefix_parts)
-    full_header_list.extend(core_parts)
-    full_header_list.extend(suffix_parts)
-    
-    header = " | ".join(full_header_list)
+    if "interval" in items_to_show:
+        header_parts.append(f"Interval: {interval}s")
+
+    if "game" in items_to_show:
+        header_parts.append(f"Game {game_no}")
+
+    if "gen" in items_to_show:
+        header_parts.append(f"Generation {generation}")
+
+    if "alive" in items_to_show:
+        alive_str = f"Alive {alive}"
+        if generation > 0:
+            alive_str += f" (Δ:{alive_delta:+})"  # Show sign for delta (+/-)
+        header_parts.append(alive_str)
+
+    if "density" in items_to_show:
+        header_parts.append(f"Density: {density:.1f}%")
+
+    if "fps" in items_to_show:
+        header_parts.append(f"FPS: {fps:.1f}")
+
+    header = " | ".join(header_parts)
 
     # --- Rendering ---
-    print(header)
-    print("-" * len(header))
-    for row in board:
-        print("".join(live_cell if cell else dead_cell for cell in row))
+    if header:
+        print(header)
+        print("-" * len(header))
+    
+    for r, row in enumerate(board):
+        line_parts = []
+        for c, cell in enumerate(row):
+            char_to_render = live_cell if cell else dead_cell
+            if edit_mode and r == cursor_y and c == cursor_x:
+                # Apply background color to the cursor cell
+                line_parts.append(f"{BG_CYAN}{char_to_render}{RESET}")
+            else:
+                line_parts.append(char_to_render)
+        print("".join(line_parts))
     print(flush=True)
 
 
@@ -197,6 +224,7 @@ def run(
     stagnate_limit: Optional[int],
     live_cell: str,
     dead_cell: str,
+    header_items: str,
 ) -> None:
     """
     Dead conditions
@@ -212,9 +240,13 @@ def run(
     history: Optional[Deque[int]] = (
         deque(maxlen=stagnate_limit) if stagnate_limit else None
     )
+    paused = False
+    edit_mode = False
+    cursor_y, cursor_x = 0, 0
 
+    # --- Terminal setup for non-blocking input ---
+    old_settings = None
     if os.name != "nt":
-        # Set up terminal for non-blocking input on Unix-like systems
         old_settings = termios.tcgetattr(sys.stdin)
         tty.setcbreak(sys.stdin.fileno())
 
@@ -252,82 +284,154 @@ def run(
                 density_val,
                 fps,
                 alive_delta,
+                header_items,
+                paused,
+                edit_mode,
+                cursor_y,
+                cursor_x,
             )
 
-            # Update for next iteration
-            last_alive_count = alive
+            # Update for next iteration (only if not in edit mode)
+            if not edit_mode:
+                last_alive_count = alive
 
-            # Dead condition check
-            stagnated = False
-            if history is not None and len(history) == history.maxlen:
-                if is_cyclical(list(history)):
-                    stagnated = True
+            # --- Dead condition check (only if not paused/editing) ---
+            if not paused and not edit_mode:
+                stagnated = False
+                if history is not None and len(history) == history.maxlen:
+                    if is_cyclical(list(history)):
+                        stagnated = True
 
-            if alive == 0 or stagnated:
-                effective_generation = generation
-                if stagnated and stagnate_limit is not None:
-                    effective_generation -= stagnate_limit
-                max_generation = max(max_generation, effective_generation)
+                if alive == 0 or stagnated:
+                    effective_generation = generation
+                    if stagnated and stagnate_limit is not None:
+                        effective_generation -= stagnate_limit
+                    max_generation = max(max_generation, effective_generation)
 
-                if endless:
-                    time.sleep(interval)  # Wait before restarting
-                    game_no += 1
-                    board = create_board(rows, cols, density)
-                    generation = 0
-                    last_alive_count = 0 # Reset for new game
-                    if history is not None:
-                        history.clear()
-                    continue
-                reason = (
-                    "All cells are dead."
-                    if alive == 0
-                    else "Stagnation or two-value oscillation detected."
-                )
-                print(f"{reason} Exiting.")
-                render_results(game_no, max_generation)
-                break
+                    if endless:
+                        time.sleep(interval)  # Wait before restarting
+                        game_no += 1
+                        board = create_board(rows, cols, density)
+                        generation = 0
+                        last_alive_count = 0
+                        if history is not None:
+                            history.clear()
+                        continue
+                    reason = (
+                        "All cells are dead."
+                        if alive == 0
+                        else "Stagnation or two-value oscillation detected."
+                    )
+                    print(f"{reason} Exiting.")
+                    render_results(game_no, max_generation)
+                    break
 
-            # Append current state to history before waiting
-            if history is not None:
-                history.append(alive)
+                # Append current state to history before waiting
+                if history is not None:
+                    history.append(alive)
 
-            # Non-blocking wait for interval, checking for 'R' key
-            key_pressed_r = False
+            # --- Non-blocking input handling ---
+            user_input = None
+            # Determine wait timeout: None (block) if paused, otherwise interval.
+            timeout = None if paused or edit_mode else interval
             if os.name == "nt":
                 start_time = time.time()
-                while time.time() - start_time < interval:
+                while timeout is None or (time.time() - start_time < timeout):
                     if msvcrt.kbhit():
-                        if msvcrt.getch().lower() == b"r":
-                            key_pressed_r = True
-                            break
-                    time.sleep(0.01)
+                        user_input = msvcrt.getch()
+                        # Arrow keys in Windows are multi-byte sequences (e.g., b'\xe0H')
+                        if user_input in (b'\xe0', b'\x00'): 
+                            user_input += msvcrt.getch()
+                        break
+                    if timeout is None:
+                        time.sleep(0.05)
+                    else:
+                        time.sleep(0.01)
             else:  # Unix-like
-                rlist, _, _ = select.select([sys.stdin], [], [], interval)
+                rlist, _, _ = select.select([sys.stdin], [], [], timeout)
                 if rlist:
-                    if sys.stdin.read(1).lower() == "r":
-                        key_pressed_r = True
+                    user_input = sys.stdin.read(1)
+                    # Arrow keys in Unix are ANSI escape sequences (e.g., '\x1b[A')
+                    if user_input == '\x1b':
+                        # Read the rest of the sequence
+                        user_input += sys.stdin.read(2)
 
-            if key_pressed_r:
+            # --- Process User Input ---
+            # Normalize input to lowercase string
+            if isinstance(user_input, bytes):
+                try:
+                    # Decode bytes and convert to lower case for Windows
+                    processed_input = user_input.decode('utf-8').lower()
+                except UnicodeDecodeError:
+                    # Fallback for special keys that are not valid utf-8 (like arrow keys)
+                    processed_input = repr(user_input)
+            elif user_input:
+                # Convert string to lower case for Unix-like systems
+                processed_input = user_input.lower()
+            else:
+                processed_input = user_input # Keep None as is
+
+            # --- Game Control Keys ---
+            if processed_input == 'r':
                 max_generation = max(max_generation, generation)
                 game_no += 1
                 board = create_board(rows, cols, density)
                 generation = 0
-                last_alive_count = 0 # Reset for new game
-                if history is not None:
-                    history.clear()
+                last_alive_count = 0
+                paused = False
+                edit_mode = False
+                if history is not None: history.clear()
                 continue
 
-            # Proceed to next generation
+            if processed_input == 'p':
+                paused = not paused
+                edit_mode = False  # Exiting edit mode when pausing/unpausing
+                if history is not None: history.clear()
+                continue
+
+            if paused and processed_input == 'e':
+                edit_mode = not edit_mode
+                if history is not None: history.clear()
+                continue
+
+            # --- Edit Mode Keys ---
+            if edit_mode:
+                if processed_input in ('\x1b[a', repr(b'\xe0H')): # Up
+                    cursor_y = max(0, cursor_y - 1)
+                elif processed_input in ('\x1b[b', repr(b'\xe0P')): # Down
+                    cursor_y = min(rows - 1, cursor_y + 1)
+                elif processed_input in ('\x1b[d', repr(b'\xe0K')): # Left
+                    cursor_x = max(0, cursor_x - 1)
+                elif processed_input in ('\x1b[c', repr(b'\xe0M')): # Right
+                    cursor_x = min(cols - 1, cursor_x + 1)
+                elif processed_input == ' ': # Spacebar to toggle cell state
+                    board[cursor_y][cursor_x] = not board[cursor_y][cursor_x]
+                
+                # In edit mode, we loop back to wait for the next key press
+                continue
+
+            # --- Step-through ---
+            if paused and processed_input == 'n':
+                if history is not None: history.clear()
+                # Fall through to the next generation logic
+                pass
+            elif paused:
+                # If paused and any other key is pressed, do nothing.
+                continue
+
+            # --- Proceed to next generation ---
             board = next_generation(board)
             generation += 1
+
     except KeyboardInterrupt:
         max_generation = max(max_generation, generation)
         print("\nInterrupted by user. Goodbye!")
         render_results(game_no, max_generation)
     finally:
-        if os.name != "nt":
+        if os.name != "nt" and old_settings is not None:
             # Restore terminal settings
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+
 
 class ArgmentHelpFormatter_(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter): pass
 
@@ -397,11 +501,37 @@ def main() -> None:
         default=" ",
         help="Character for a dead cell. Must be a single character.\n"
     )
+    parser.add_argument(
+        "--header-items",
+        type=str,
+        default="game",
+        help=(
+            "Comma-separated list of items to display in the header.\n"
+            "Keywords: mode, size, interval, game, gen, alive, density, fps.\n"
+            "Example: --header-items game,gen,alive\n"
+        ),
+    )
 
     # All argument parsing and pre-run logic is wrapped in a try block
     # to gracefully handle KeyboardInterrupt (Ctrl+C) during setup.
     try:
         args = parser.parse_args()
+
+        # --- Header items validation ---
+        VALID_HEADER_KEYWORDS = {
+            "mode", "size", "interval", "game", "gen", "alive", "density", "fps"
+        }
+        if args.header_items:
+            # Split by comma, strip whitespace, convert to lower, and remove empty strings
+            user_keywords = {
+                item.strip().lower() for item in args.header_items.split(',') if item.strip()
+            }
+            # Find the difference between user's keywords and valid keywords
+            invalid_keywords = user_keywords - VALID_HEADER_KEYWORDS
+            if invalid_keywords:
+                # Sort for consistent and readable error messages
+                sorted_invalid = ", ".join(sorted(list(invalid_keywords)))
+                sys.exit(f"Error: Invalid keyword(s) in --header-items: {sorted_invalid}")
 
         if len(args.live_cell) != 1:
             sys.exit("Error: --live-cell must be a single character.")
@@ -436,6 +566,7 @@ def main() -> None:
             stagnate_limit=effective_stagnate if effective_stagnate > 0 else None,
             live_cell=args.live_cell,
             dead_cell=args.dead_cell,
+            header_items=args.header_items,
         )
     except KeyboardInterrupt:
         # Catch Ctrl+C during the argument parsing or the 5-second wait
