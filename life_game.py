@@ -36,7 +36,7 @@ CellGrid = List[List[bool]]  # True = alive, False = dead
 # ──────────────────────────────────────────────────────────────
 #  Game logic
 # ──────────────────────────────────────────────────────────────
-def next_generation(board: CellGrid) -> CellGrid:
+def next_generation(board: CellGrid, torus: bool = False) -> CellGrid:
     """Return the next generation according to Conway's rules."""
     rows, cols = len(board), len(board[0])
     new_board = [[False] * cols for _ in range(rows)]
@@ -48,8 +48,13 @@ def next_generation(board: CellGrid) -> CellGrid:
                 for dc in (-1, 0, 1):
                     if dr == dc == 0:
                         continue
+                    
                     nr, nc = r + dr, c + dc
-                    if 0 <= nr < rows and 0 <= nc < cols and board[nr][nc]:
+                    if torus:
+                        nr %= rows
+                        nc %= cols
+                        live_neighbors += board[nr][nc]
+                    elif 0 <= nr < rows and 0 <= nc < cols and board[nr][nc]:
                         live_neighbors += 1
 
             new_board[r][c] = (
@@ -95,6 +100,7 @@ def render(
     pattern_scroll_offset: int = 0,
     search_mode: bool = False,
     search_query: str = "",
+    torus: bool = False,
 ) -> None:
     """Render the current board state to the terminal with a detailed header."""
     # ANSI codes for cursor highlighting
@@ -126,6 +132,8 @@ def render(
             mode_str_parts.append("[Endless]")
         if keep_alive:
             mode_str_parts.append("[Keep Alive]")
+        if torus:
+            mode_str_parts.append("[Torus]")
         if stagnate_limit is not None:
             mode_str_parts.append(f"[Stagnate: {stagnate_limit}]")
         if mode_str_parts:
@@ -314,6 +322,7 @@ def run(
     dead_cell: str,
     header_items: str,
     keep_alive: bool,
+    torus: bool,
 ) -> None:
     """
     Dead conditions
@@ -334,6 +343,7 @@ def run(
     edit_mode = False
     pattern_selection_mode = False
     placement_mode = False
+    torus_mode = torus
     
     # --- Cursor and pattern state ---
     cursor_y, cursor_x = 0, 0
@@ -416,6 +426,7 @@ def run(
                 pattern_scroll_offset,
                 search_mode,
                 search_query,
+                torus_mode,
             )
 
             # Update for next iteration (only if not in edit mode)
@@ -530,6 +541,11 @@ def run(
                 edit_mode = False
                 continue
 
+            if processed_input == 't':
+                torus_mode = not torus_mode
+                if history is not None: history.clear()
+                continue
+
             # --- Pattern Selection Mode ---
             if pattern_selection_mode:
                 # Filter patterns based on search query
@@ -631,7 +647,7 @@ def run(
                 continue
 
             # --- Proceed to next generation ---
-            board = next_generation(board)
+            board = next_generation(board, torus=torus_mode)
             generation += 1
 
 
@@ -683,6 +699,11 @@ def main() -> None:
         "--max",
         action="store_true",
         help="Fit the board to the current terminal size (overrides rows and columns).\n",
+    )
+    parser.add_argument(
+        "--torus",
+        action="store_true",
+        help="Enable torus mode (wraparound edges).\n",
     )
     parser.add_argument(
         "--endless",
@@ -785,6 +806,7 @@ def main() -> None:
             dead_cell=args.dead_cell,
             header_items=args.header_items,
             keep_alive=args.keep_alive,
+            torus=args.torus,
         )
     except KeyboardInterrupt:
         # Catch Ctrl+C during the argument parsing or the 5-second wait
