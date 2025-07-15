@@ -27,6 +27,7 @@ else:
     import select
     import termios
     import tty
+from patterns import PATTERN_LIBRARY, Pattern
 
 
 CellGrid = List[List[bool]]  # True = alive, False = dead
@@ -35,7 +36,7 @@ CellGrid = List[List[bool]]  # True = alive, False = dead
 # ──────────────────────────────────────────────────────────────
 #  Game logic
 # ──────────────────────────────────────────────────────────────
-def next_generation(board: CellGrid) -> CellGrid:
+def next_generation(board: CellGrid, torus: bool = False) -> CellGrid:
     """Return the next generation according to Conway's rules."""
     rows, cols = len(board), len(board[0])
     new_board = [[False] * cols for _ in range(rows)]
@@ -47,8 +48,13 @@ def next_generation(board: CellGrid) -> CellGrid:
                 for dc in (-1, 0, 1):
                     if dr == dc == 0:
                         continue
+                    
                     nr, nc = r + dr, c + dc
-                    if 0 <= nr < rows and 0 <= nc < cols and board[nr][nc]:
+                    if torus:
+                        nr %= rows
+                        nc %= cols
+                        live_neighbors += board[nr][nc]
+                    elif 0 <= nr < rows and 0 <= nc < cols and board[nr][nc]:
                         live_neighbors += 1
 
             new_board[r][c] = (
@@ -85,10 +91,23 @@ def render(
     edit_mode: bool,
     cursor_y: int,
     cursor_x: int,
+    pattern_selection_mode: bool = False,
+    placement_mode: bool = False,
+    selected_pattern_index: int = 0,
+    pattern_names: Optional[List[str]] = None,
+    current_pattern_data: Optional[Pattern] = None,
+    keep_alive: bool = False,
+    pattern_scroll_offset: int = 0,
+    search_mode: bool = False,
+    search_query: str = "",
+    torus: bool = False,
 ) -> None:
     """Render the current board state to the terminal with a detailed header."""
     # ANSI codes for cursor highlighting
     BG_CYAN = "\x1b[46m"
+    BG_GREEN = "\x1b[42m"
+    FG_BLACK = "\x1b[30m"
+    GHOST_CELL = "\x1b[90m" + live_cell + "\x1b[0m"  # Gray
     RESET = "\x1b[0m"
 
     # --- Header Construction ---
@@ -100,12 +119,21 @@ def render(
 
     if "mode" in items_to_show:
         mode_str_parts = []
-        if edit_mode:
+        if pattern_selection_mode:
+            mode_str_parts.append("[Pattern Library]")
+        elif placement_mode:
+            mode_str_parts.append("[Pattern Placement]")
+        elif edit_mode:
             mode_str_parts.append("[Editing]")
         elif paused:
             mode_str_parts.append("[Paused]")
+
         if endless:
             mode_str_parts.append("[Endless]")
+        if keep_alive:
+            mode_str_parts.append("[Keep Alive]")
+        if torus:
+            mode_str_parts.append("[Torus]")
         if stagnate_limit is not None:
             mode_str_parts.append(f"[Stagnate: {stagnate_limit}]")
         if mode_str_parts:
@@ -141,17 +169,56 @@ def render(
     if header:
         print(header)
         print("-" * len(header))
-    
+
+    if pattern_selection_mode:
+        print("Select a pattern using ↑/↓ arrows, press Space to place it.")
+        print("Press 'L' or Esc to cancel.")
+        print("-" * len(header) if header else "-" * 20)
+        if pattern_names:
+            # Calculate how many items can be shown
+            # Subtract lines for header, separator, and instructions
+            header_height = 3 if header else 1 
+            instruction_height = 3
+            max_items = rows - header_height - instruction_height
+            
+            # Get the slice of patterns to display
+            display_patterns = pattern_names[pattern_scroll_offset:pattern_scroll_offset + max_items]
+
+            for i, name in enumerate(display_patterns, start=pattern_scroll_offset):
+                if i == selected_pattern_index:
+                    print(f"> {BG_GREEN}{FG_BLACK} {name} {RESET}")
+                else:
+                    print(f"  {name}")
+        
+        if search_mode:
+            print(f"\nSearch: /{search_query}_")
+        return
+
+    ghost_cells = set()
+    if placement_mode and current_pattern_data:
+        for r_offset, c_offset in current_pattern_data:
+            ghost_cells.add((cursor_y + r_offset, cursor_x + c_offset))
+
     for r, row in enumerate(board):
         line_parts = []
         for c, cell in enumerate(row):
+            is_cursor = (edit_mode or placement_mode) and r == cursor_y and c == cursor_x
+            is_ghost = (r, c) in ghost_cells
+
             char_to_render = live_cell if cell else dead_cell
-            if edit_mode and r == cursor_y and c == cursor_x:
-                # Apply background color to the cursor cell
+            
+            if is_ghost and not cell:
+                char_to_render = GHOST_CELL
+
+            if is_cursor:
                 line_parts.append(f"{BG_CYAN}{char_to_render}{RESET}")
             else:
                 line_parts.append(char_to_render)
         print("".join(line_parts))
+    
+    if placement_mode:
+        print("Move:↑/↓/←/→ | Rotate: R | Flip: F | Place: Space | Cancel: L or Esc", end="")
+
     print(flush=True)
 
 
@@ -212,6 +279,35 @@ def is_cyclical(seq: List[int]) -> bool:
     return False
 
 
+def rotate_pattern(pattern: Pattern, angle: int) -> Pattern:
+    """Rotate a pattern by a given angle (90, 180, 270 degrees)."""
+    if angle == 0:
+        return pattern
+    
+    rotated_pattern: List[tuple[int, int]] = []
+    if angle == 90:
+        rotated_pattern = [(c, -r) for r, c in pattern]
+    elif angle == 180:
+        rotated_pattern = [(-r, -c) for r, c in pattern]
+    elif angle == 270:
+        rotated_pattern = [(-c, r) for r, c in pattern]
+    else:
+        return pattern
+
+    # Normalize coordinates to be non-negative
+    min_r = min(r for r, c in rotated_pattern) if rotated_pattern else 0
+    min_c = min(c for r, c in rotated_pattern) if rotated_pattern else 0
+    return [(r - min_r, c - min_c) for r, c in rotated_pattern]
+
+
+def flip_pattern(pattern: Pattern) -> Pattern:
+    """Flip a pattern horizontally."""
+    if not pattern:
+        return []
+    max_c = max(c for _, c in pattern)
+    return [(r, max_c - c) for r, c in pattern]
+
+
 # ──────────────────────────────────────────────────────────────
 #  Main loop
 # ──────────────────────────────────────────────────────────────
@@ -225,6 +321,8 @@ def run(
     live_cell: str,
     dead_cell: str,
     header_items: str,
+    keep_alive: bool,
+    torus: bool,
 ) -> None:
     """
     Dead conditions
@@ -240,9 +338,24 @@ def run(
     history: Optional[Deque[int]] = (
         deque(maxlen=stagnate_limit) if stagnate_limit else None
     )
+    # --- Mode flags ---
     paused = False
     edit_mode = False
+    pattern_selection_mode = False
+    placement_mode = False
+    torus_mode = torus
+    
+    # --- Cursor and pattern state ---
     cursor_y, cursor_x = 0, 0
+    pattern_names = list(PATTERN_LIBRARY.keys())
+    selected_pattern_index = 0
+    pattern_scroll_offset = 0
+    search_mode = False
+    search_query = ""
+    current_pattern_data: Optional[Pattern] = None
+    pattern_rotation = 0
+    pattern_flip = False
+
 
     # --- Terminal setup for non-blocking input ---
     old_settings = None
@@ -267,6 +380,21 @@ def run(
                 fps = 1.0 / time_delta
             last_render_time = current_time
 
+            # --- Prepare pattern for rendering ---
+            display_pattern = None
+            # Filter patterns based on search query for rendering the list
+            if search_query:
+                display_names_for_render = [name for name in pattern_names if search_query.lower() in name.lower()]
+            else:
+                display_names_for_render = pattern_names
+
+            if placement_mode and display_names_for_render:
+                selected_name = display_names_for_render[selected_pattern_index]
+                pattern = PATTERN_LIBRARY[selected_name]
+                if pattern_flip:
+                    pattern = flip_pattern(pattern)
+                display_pattern = rotate_pattern(pattern, pattern_rotation)
+
             # --- Render the board ---
             clear_screen()
             render(
@@ -289,20 +417,31 @@ def run(
                 edit_mode,
                 cursor_y,
                 cursor_x,
+                pattern_selection_mode,
+                placement_mode,
+                selected_pattern_index,
+                display_names_for_render, # Use filtered list for rendering
+                display_pattern,
+                keep_alive,
+                pattern_scroll_offset,
+                search_mode,
+                search_query,
+                torus_mode,
             )
 
             # Update for next iteration (only if not in edit mode)
-            if not edit_mode:
+            if not edit_mode and not placement_mode:
                 last_alive_count = alive
 
             # --- Dead condition check (only if not paused/editing) ---
-            if not paused and not edit_mode:
+            is_static_mode = paused or edit_mode or placement_mode or pattern_selection_mode
+            if not is_static_mode:
                 stagnated = False
                 if history is not None and len(history) == history.maxlen:
                     if is_cyclical(list(history)):
                         stagnated = True
 
-                if alive == 0 or stagnated:
+                if (alive == 0 and not keep_alive) or stagnated:
                     effective_generation = generation
                     if stagnated and stagnate_limit is not None:
                         effective_generation -= stagnate_limit
@@ -333,7 +472,7 @@ def run(
             # --- Non-blocking input handling ---
             user_input = None
             # Determine wait timeout: None (block) if paused, otherwise interval.
-            timeout = None if paused or edit_mode else interval
+            timeout = None if is_static_mode else interval
             if os.name == "nt":
                 start_time = time.time()
                 while timeout is None or (time.time() - start_time < timeout):
@@ -372,7 +511,7 @@ def run(
                 processed_input = user_input # Keep None as is
 
             # --- Game Control Keys ---
-            if processed_input == 'r':
+            if processed_input == 'r' and not placement_mode:
                 max_generation = max(max_generation, generation)
                 game_no += 1
                 board = create_board(rows, cols, density)
@@ -385,13 +524,101 @@ def run(
 
             if processed_input == 'p':
                 paused = not paused
-                edit_mode = False  # Exiting edit mode when pausing/unpausing
+                edit_mode = False
+                placement_mode = False
+                pattern_selection_mode = False
                 if history is not None: history.clear()
                 continue
 
-            if paused and processed_input == 'e':
+            if paused and not placement_mode and not pattern_selection_mode and processed_input == 'e':
                 edit_mode = not edit_mode
                 if history is not None: history.clear()
+                continue
+            
+            if paused and not edit_mode and not placement_mode and processed_input == 'l':
+                pattern_selection_mode = not pattern_selection_mode
+                placement_mode = False
+                edit_mode = False
+                continue
+
+            if processed_input == 't':
+                torus_mode = not torus_mode
+                if history is not None: history.clear()
+                continue
+
+            # --- Pattern Selection Mode ---
+            if pattern_selection_mode:
+                # Filter patterns based on search query
+                if search_query:
+                    display_names = [name for name in pattern_names if search_query.lower() in name.lower()]
+                else:
+                    display_names = pattern_names
+
+                # Calculate visible items for scrolling logic
+                header_height = 3 if header_items else 1
+                instruction_height = 3
+                max_items = rows - header_height - instruction_height
+
+                if search_mode:
+                    if processed_input and len(processed_input) == 1 and processed_input.isprintable():
+                        search_query += processed_input
+                    elif processed_input == repr(b'\x7f') or processed_input == repr(b'\x08'): # Backspace
+                        search_query = search_query[:-1]
+                    elif processed_input == '\r' or processed_input == '\n': # Enter
+                        search_mode = False
+                    elif processed_input == '\x1b': # Esc
+                        search_mode = False
+                        search_query = ""
+                    
+                    # Reset selection when query changes
+                    selected_pattern_index = 0
+                    pattern_scroll_offset = 0
+
+                else: # Not in search_mode (i.e., navigating the list)
+                    if processed_input == '/':
+                        search_mode = True
+                        search_query = ""
+                    elif processed_input in ('\x1b[a', repr(b'\xe0H')): # Up
+                        selected_pattern_index = max(0, selected_pattern_index - 1)
+                        if selected_pattern_index < pattern_scroll_offset:
+                            pattern_scroll_offset = selected_pattern_index
+                    elif processed_input in ('\x1b[b', repr(b'\xe0P')): # Down
+                        selected_pattern_index = min(len(display_names) - 1, selected_pattern_index + 1)
+                        if selected_pattern_index >= pattern_scroll_offset + max_items:
+                            pattern_scroll_offset = selected_pattern_index - max_items + 1
+                    elif processed_input == ' ': # Spacebar to select
+                        if display_names:
+                            pattern_selection_mode = False
+                            placement_mode = True
+                            pattern_rotation = 0
+                            pattern_flip = False
+
+                    elif processed_input == 'l' or processed_input == '\x1b': # 'l' or Esc
+                        pattern_selection_mode = False
+                continue
+
+            # --- Placement Mode ---
+            if placement_mode:
+                if processed_input in ('\x1b[a', repr(b'\xe0H')): # Up
+                    cursor_y = max(0, cursor_y - 1)
+                elif processed_input in ('\x1b[b', repr(b'\xe0P')): # Down
+                    cursor_y = min(rows - 1, cursor_y + 1)
+                elif processed_input in ('\x1b[d', repr(b'\xe0K')): # Left
+                    cursor_x = max(0, cursor_x - 1)
+                elif processed_input in ('\x1b[c', repr(b'\xe0M')): # Right
+                    cursor_x = min(cols - 1, cursor_x + 1)
+                elif processed_input == 'r':
+                    pattern_rotation = (pattern_rotation + 90) % 360
+                elif processed_input == 'f':
+                    pattern_flip = not pattern_flip
+                elif processed_input == ' ': # Spacebar to place pattern
+                    if display_pattern:
+                        for r_offset, c_offset in display_pattern:
+                            r, c = cursor_y + r_offset, cursor_x + c_offset
+                            if 0 <= r < rows and 0 <= c < cols:
+                                board[r][c] = True
+                elif processed_input == 'l' or processed_input == '\x1b': # 'l' or Esc
+                    placement_mode = False
                 continue
 
             # --- Edit Mode Keys ---
@@ -420,8 +647,9 @@ def run(
                 continue
 
             # --- Proceed to next generation ---
-            board = next_generation(board)
+            board = next_generation(board, torus=torus_mode)
             generation += 1
+
 
     except KeyboardInterrupt:
         max_generation = max(max_generation, generation)
@@ -473,9 +701,19 @@ def main() -> None:
         help="Fit the board to the current terminal size (overrides rows and columns).\n",
     )
     parser.add_argument(
+        "--torus",
+        action="store_true",
+        help="Enable torus mode (wraparound edges).\n",
+    )
+    parser.add_argument(
         "--endless",
         action="store_true",
         help="Restart automatically with a fresh board when a Dead condition is met.\n",
+    )
+    parser.add_argument(
+        "--keep-alive",
+        action="store_true",
+        help="Prevent the game from ending when all cells are dead.\n",
     )
     parser.add_argument(
         "--stagnate",
@@ -567,6 +805,8 @@ def main() -> None:
             live_cell=args.live_cell,
             dead_cell=args.dead_cell,
             header_items=args.header_items,
+            keep_alive=args.keep_alive,
+            torus=args.torus,
         )
     except KeyboardInterrupt:
         # Catch Ctrl+C during the argument parsing or the 5-second wait

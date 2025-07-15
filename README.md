@@ -4,6 +4,9 @@
 
 見てるだけで面白いですよね
 
+Gemini 2.5 Proくんに書いてもらってます  
+この子優秀すぎてやばい
+
 ---
 
 ## オプション
@@ -22,7 +25,11 @@ options:
   --max                 現在のターミナルサイズに合わせて盤面を調整します
                         （rows と cols を上書き）。
                          （デフォルト: False）
+  --torus               トーラスモード（端をラップアラウンド）を有効にします。
+                         （デフォルト: False）
   --endless             死亡条件を満たしたら自動的に新しい盤面で再開します。
+                         （デフォルト: False）
+  --keep-alive          すべてのセルが死んでもゲームを終了しないようにします。
                          （デフォルト: False）
   --stagnate N          ライブセル数が N 世代連続で変化しなければ死亡と判定します
                         （0 で無効）。
@@ -35,6 +42,12 @@ options:
   --dead-cell DEAD_CELL
                         デッドセルを表す文字（1 文字）。
                          （デフォルト:  ）
+  --header-items HEADER_ITEMS
+                        ヘッダーに表示する項目をカンマ区切りで指定します。
+                        キーワード: mode, size, interval, game, gen, alive, density, fps
+                        例: --header-items game,gen,alive
+                         （デフォルト: game）
+
 ```
 
 stagnateはちょっと実験的機能かもしれない
@@ -45,3 +58,5 @@ stagnateはちょっと実験的機能かもしれない
   - n: 一コマ進める
   - e: 編集モード
     - SPACE: セルを有効化/無効化
+  - l: 追加するパターンの選択
+- t: トーラスモードの有効化/無効化
