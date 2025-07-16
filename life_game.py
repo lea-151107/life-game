@@ -21,8 +21,6 @@ import time
 from collections import deque
 from typing import Deque, List, Optional
 
-from colorama import init as colorama_init
-
 if os.name == "nt":
     import msvcrt
 else:
@@ -68,6 +66,11 @@ def next_generation(board: CellGrid, torus: bool = False) -> CellGrid:
 # ──────────────────────────────────────────────────────────────
 #  Rendering
 # ──────────────────────────────────────────────────────────────
+def clear_screen() -> None:
+    """Clear the entire terminal window."""
+    os.system("cls" if os.name == "nt" else "clear")
+
+
 def render(
     board: CellGrid,
     generation: int,
@@ -100,10 +103,6 @@ def render(
     torus: bool = False,
 ) -> None:
     """Render the current board state to the terminal with a detailed header."""
-    output_buffer = []
-    # ANSI escape code to move cursor to top-left and clear screen
-    output_buffer.append("\x1b[H\x1b[J")
-
     # ANSI codes for cursor highlighting
     BG_CYAN = "\x1b[46m"
     BG_GREEN = "\x1b[42m"
@@ -168,33 +167,31 @@ def render(
 
     # --- Rendering ---
     if header:
-        output_buffer.append(header)
-        output_buffer.append("-" * len(header))
+        print(header)
+        print("-" * len(header))
 
     if pattern_selection_mode:
-        output_buffer.append("Select a pattern using ↑/↓ arrows, press Space to place it.")
-        output_buffer.append("Press 'L' or Esc to cancel.")
-        output_buffer.append("-" * len(header) if header else "-" * 20)
+        print("Select a pattern using ↑/↓ arrows, press Space to place it.")
+        print("Press 'L' or Esc to cancel.")
+        print("-" * len(header) if header else "-" * 20)
         if pattern_names:
             # Calculate how many items can be shown
             # Subtract lines for header, separator, and instructions
-            header_height = 3 if header else 1
+            header_height = 3 if header else 1 
             instruction_height = 3
             max_items = rows - header_height - instruction_height
-
+            
             # Get the slice of patterns to display
             display_patterns = pattern_names[pattern_scroll_offset:pattern_scroll_offset + max_items]
 
             for i, name in enumerate(display_patterns, start=pattern_scroll_offset):
                 if i == selected_pattern_index:
-                    output_buffer.append(f"> {BG_GREEN}{FG_BLACK} {name} {RESET}")
+                    print(f"> {BG_GREEN}{FG_BLACK} {name} {RESET}")
                 else:
-                    output_buffer.append(f"  {name}")
-
-        if search_mode:
-            output_buffer.append(f"\nSearch: /{search_query}_")
+                    print(f"  {name}")
         
-        print("\n".join(output_buffer), flush=True)
+        if search_mode:
+            print(f"\nSearch: /{search_query}_")
         return
 
     ghost_cells = set()
@@ -209,7 +206,7 @@ def render(
             is_ghost = (r, c) in ghost_cells
 
             char_to_render = live_cell if cell else dead_cell
-
+            
             if is_ghost and not cell:
                 char_to_render = GHOST_CELL
 
@@ -217,14 +214,12 @@ def render(
                 line_parts.append(f"{BG_CYAN}{char_to_render}{RESET}")
             else:
                 line_parts.append(char_to_render)
-        output_buffer.append("".join(line_parts))
-
+        print("".join(line_parts))
+    
     if placement_mode:
-        # Use print without newline to keep it on the same line as the board
-        print("\n".join(output_buffer), flush=True)
-        print("Move:↑/↓/←/→ | Rotate: R | Flip: F | Place: Space | Cancel: L or Esc", end="", flush=True)
-    else:
-        print("\n".join(output_buffer), flush=True)
+        print("Move:↑/↓/←/→ | Rotate: R | Flip: F | Place: Space | Cancel: L or Esc", end="")
+
+    print(flush=True)
 
 
 def render_results(game_no: int, max_generation: int) -> None:
@@ -401,6 +396,7 @@ def run(
                 display_pattern = rotate_pattern(pattern, pattern_rotation)
 
             # --- Render the board ---
+            clear_screen()
             render(
                 board,
                 generation,
@@ -757,7 +753,6 @@ def main() -> None:
     # All argument parsing and pre-run logic is wrapped in a try block
     # to gracefully handle KeyboardInterrupt (Ctrl+C) during setup.
     try:
-        colorama_init()  # Initialize colorama for cross-platform ANSI support
         args = parser.parse_args()
 
         # --- Header items validation ---
