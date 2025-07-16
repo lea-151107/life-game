@@ -21,6 +21,8 @@ import time
 from collections import deque
 from typing import Deque, List, Optional
 
+from colorama import init as colorama_init
+
 if os.name == "nt":
     import msvcrt
 else:
@@ -755,8 +757,7 @@ def main() -> None:
     # All argument parsing and pre-run logic is wrapped in a try block
     # to gracefully handle KeyboardInterrupt (Ctrl+C) during setup.
     try:
-        if os.name == "nt":
-            os.system("")  # Enable ANSI escape codes on Windows
+        colorama_init()  # Initialize colorama for cross-platform ANSI support
         args = parser.parse_args()
 
         # --- Header items validation ---
