@@ -221,7 +221,7 @@ def render(
 
     if placement_mode:
         # Use print without newline to keep it on the same line as the board
-        print("\n".join(output_buffer))
+        print("\n".join(output_buffer), flush=True)
         print("Move:↑/↓/←/→ | Rotate: R | Flip: F | Place: Space | Cancel: L or Esc", end="", flush=True)
     else:
         print("\n".join(output_buffer), flush=True)
