@@ -19,7 +19,8 @@ import shutil
 import sys
 import time
 from collections import deque
-from typing import Deque, List, Optional
+from enum import Enum, auto
+from typing import Deque, List, Optional, Union
 
 from colorama import init as colorama_init
 
@@ -313,6 +314,110 @@ def flip_pattern(pattern: Pattern) -> Pattern:
     return [(r, max_c - c) for r, c in pattern]
 
 
+class Key(Enum):
+    UP = auto()
+    DOWN = auto()
+    LEFT = auto()
+    RIGHT = auto()
+    SELECT = auto()
+    CANCEL = auto()
+    RESTART = auto()
+    PAUSE = auto()
+    EDIT = auto()
+    PATTERN_MENU = auto()
+    TOGGLE_TORUS = auto()
+    ROTATE = auto()
+    FLIP = auto()
+    NEXT_FRAME = auto()
+    SEARCH = auto()
+    BACKSPACE = auto()
+    ENTER = auto()
+
+# Key mapping for different platforms
+KEY_MAP = {
+    # Unix-like (ANSI escape codes)
+    '\x1b[a': Key.UP,
+    '\x1b[b': Key.DOWN,
+    '\x1b[d': Key.LEFT,
+    '\x1b[c': Key.RIGHT,
+    '\x1b': Key.CANCEL,
+    '\x7f': Key.BACKSPACE,
+    # Windows (msvcrt)
+    repr(b'\xe0H'): Key.UP,
+    repr(b'\xe0P'): Key.DOWN,
+    repr(b'\xe0K'): Key.LEFT,
+    repr(b'\xe0M'): Key.RIGHT,
+    repr(b'\x08'): Key.BACKSPACE,
+    # Common keys
+    ' ': Key.SELECT,
+    '\r': Key.ENTER,
+    '\n': Key.ENTER,
+    'r': Key.RESTART,
+    'p': Key.PAUSE,
+    'e': Key.EDIT,
+    'l': Key.PATTERN_MENU,
+    't': Key.TOGGLE_TORUS,
+    'f': Key.FLIP,
+    'n': Key.NEXT_FRAME,
+    '/': Key.SEARCH,
+}
+
+def get_key(timeout: Optional[float]) -> Optional[Union[Key, str]]:
+    """
+    Get a key press and convert it to a Key enum or a character.
+    Handles platform-specific key codes.
+    """
+    user_input = None
+    if os.name == "nt":
+        start_time = time.time()
+        while timeout is None or (time.time() - start_time < timeout):
+            if msvcrt.kbhit():
+                user_input = msvcrt.getch()
+                if user_input in (b'\xe0', b'\x00'):
+                    user_input += msvcrt.getch()
+                break
+            if timeout is None:
+                time.sleep(0.05)
+            else:
+                time.sleep(0.01)
+    else:  # Unix-like
+        rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+        if rlist:
+            user_input = sys.stdin.read(1)
+            if user_input == '\x1b':
+                # Read the rest of the ANSI sequence if available
+                # This is a simplified way to handle arrow keys and might need
+                # more robust handling for other sequences.
+                if select.select([sys.stdin], [], [], 0)[0]:
+                    user_input += sys.stdin.read(2)
+
+    if user_input is None:
+        return None
+
+    # Normalize input to a consistent string format
+    if isinstance(user_input, bytes):
+        try:
+            # For regular keys, decode to string
+            processed_input = user_input.decode('utf-8').lower()
+        except UnicodeDecodeError:
+            # For special keys (like arrows on Windows), use repr
+            processed_input = repr(user_input)
+    else:
+        # For Unix-like systems, it's already a string
+        processed_input = user_input.lower()
+
+    # Check against the key map first
+    if processed_input in KEY_MAP:
+        return KEY_MAP[processed_input]
+
+    # If it's not a mapped key, return the character if it's printable
+    if len(processed_input) == 1 and processed_input.isprintable():
+        return processed_input
+
+    return None
+
+
+
 # ──────────────────────────────────────────────────────────────
 #  Main loop
 # ──────────────────────────────────────────────────────────────
@@ -474,48 +579,19 @@ def run(
                     history.append(alive)
 
             # --- Non-blocking input handling ---
-            user_input = None
-            # Determine wait timeout: None (block) if paused, otherwise interval.
             timeout = None if is_static_mode else interval
-            if os.name == "nt":
-                start_time = time.time()
-                while timeout is None or (time.time() - start_time < timeout):
-                    if msvcrt.kbhit():
-                        user_input = msvcrt.getch()
-                        # Arrow keys in Windows are multi-byte sequences (e.g., b'\xe0H')
-                        if user_input in (b'\xe0', b'\x00'): 
-                            user_input += msvcrt.getch()
-                        break
-                    if timeout is None:
-                        time.sleep(0.05)
-                    else:
-                        time.sleep(0.01)
-            else:  # Unix-like
-                rlist, _, _ = select.select([sys.stdin], [], [], timeout)
-                if rlist:
-                    user_input = sys.stdin.read(1)
-                    # Arrow keys in Unix are ANSI escape sequences (e.g., '\x1b[A')
-                    if user_input == '\x1b':
-                        # Read the rest of the sequence
-                        user_input += sys.stdin.read(2)
+            action = get_key(timeout)
 
             # --- Process User Input ---
-            # Normalize input to lowercase string
-            if isinstance(user_input, bytes):
-                try:
-                    # Decode bytes and convert to lower case for Windows
-                    processed_input = user_input.decode('utf-8').lower()
-                except UnicodeDecodeError:
-                    # Fallback for special keys that are not valid utf-8 (like arrow keys)
-                    processed_input = repr(user_input)
-            elif user_input:
-                # Convert string to lower case for Unix-like systems
-                processed_input = user_input.lower()
-            else:
-                processed_input = user_input # Keep None as is
+            if action is None:
+                # No input, proceed to next generation if not paused
+                if not is_static_mode:
+                    board = next_generation(board, torus=torus_mode)
+                    generation += 1
+                continue
 
             # --- Game Control Keys ---
-            if processed_input == 'r' and not placement_mode:
+            if action == Key.RESTART and not placement_mode:
                 max_generation = max(max_generation, generation)
                 game_no += 1
                 board = create_board(rows, cols, density)
@@ -526,7 +602,7 @@ def run(
                 if history is not None: history.clear()
                 continue
 
-            if processed_input == 'p':
+            if action == Key.PAUSE:
                 paused = not paused
                 edit_mode = False
                 placement_mode = False
@@ -534,18 +610,18 @@ def run(
                 if history is not None: history.clear()
                 continue
 
-            if paused and not placement_mode and not pattern_selection_mode and processed_input == 'e':
+            if paused and not placement_mode and not pattern_selection_mode and action == Key.EDIT:
                 edit_mode = not edit_mode
                 if history is not None: history.clear()
                 continue
             
-            if paused and not edit_mode and not placement_mode and processed_input == 'l':
+            if paused and not edit_mode and not placement_mode and action == Key.PATTERN_MENU:
                 pattern_selection_mode = not pattern_selection_mode
                 placement_mode = False
                 edit_mode = False
                 continue
 
-            if processed_input == 't':
+            if action == Key.TOGGLE_TORUS:
                 torus_mode = not torus_mode
                 if history is not None: history.clear()
                 continue
@@ -564,13 +640,13 @@ def run(
                 max_items = rows - header_height - instruction_height
 
                 if search_mode:
-                    if processed_input and len(processed_input) == 1 and processed_input.isprintable():
-                        search_query += processed_input
-                    elif processed_input == repr(b'\x7f') or processed_input == repr(b'\x08'): # Backspace
+                    if isinstance(action, str):
+                        search_query += action
+                    elif action == Key.BACKSPACE:
                         search_query = search_query[:-1]
-                    elif processed_input == '\r' or processed_input == '\n': # Enter
+                    elif action == Key.ENTER:
                         search_mode = False
-                    elif processed_input == '\x1b': # Esc
+                    elif action == Key.CANCEL:
                         search_mode = False
                         search_query = ""
                     
@@ -579,70 +655,70 @@ def run(
                     pattern_scroll_offset = 0
 
                 else: # Not in search_mode (i.e., navigating the list)
-                    if processed_input == '/':
+                    if action == Key.SEARCH:
                         search_mode = True
                         search_query = ""
-                    elif processed_input in ('\x1b[a', repr(b'\xe0H')): # Up
+                    elif action == Key.UP:
                         selected_pattern_index = max(0, selected_pattern_index - 1)
                         if selected_pattern_index < pattern_scroll_offset:
                             pattern_scroll_offset = selected_pattern_index
-                    elif processed_input in ('\x1b[b', repr(b'\xe0P')): # Down
+                    elif action == Key.DOWN:
                         selected_pattern_index = min(len(display_names) - 1, selected_pattern_index + 1)
                         if selected_pattern_index >= pattern_scroll_offset + max_items:
                             pattern_scroll_offset = selected_pattern_index - max_items + 1
-                    elif processed_input == ' ': # Spacebar to select
+                    elif action == Key.SELECT: # Spacebar to select
                         if display_names:
                             pattern_selection_mode = False
                             placement_mode = True
                             pattern_rotation = 0
                             pattern_flip = False
 
-                    elif processed_input == 'l' or processed_input == '\x1b': # 'l' or Esc
+                    elif action in (Key.PATTERN_MENU, Key.CANCEL):
                         pattern_selection_mode = False
                 continue
 
             # --- Placement Mode ---
             if placement_mode:
-                if processed_input in ('\x1b[a', repr(b'\xe0H')): # Up
+                if action == Key.UP:
                     cursor_y = max(0, cursor_y - 1)
-                elif processed_input in ('\x1b[b', repr(b'\xe0P')): # Down
+                elif action == Key.DOWN:
                     cursor_y = min(rows - 1, cursor_y + 1)
-                elif processed_input in ('\x1b[d', repr(b'\xe0K')): # Left
+                elif action == Key.LEFT:
                     cursor_x = max(0, cursor_x - 1)
-                elif processed_input in ('\x1b[c', repr(b'\xe0M')): # Right
+                elif action == Key.RIGHT:
                     cursor_x = min(cols - 1, cursor_x + 1)
-                elif processed_input == 'r':
+                elif action == Key.ROTATE:
                     pattern_rotation = (pattern_rotation + 90) % 360
-                elif processed_input == 'f':
+                elif action == Key.FLIP:
                     pattern_flip = not pattern_flip
-                elif processed_input == ' ': # Spacebar to place pattern
+                elif action == Key.SELECT: # Spacebar to place pattern
                     if display_pattern:
                         for r_offset, c_offset in display_pattern:
                             r, c = cursor_y + r_offset, cursor_x + c_offset
                             if 0 <= r < rows and 0 <= c < cols:
                                 board[r][c] = True
-                elif processed_input == 'l' or processed_input == '\x1b': # 'l' or Esc
+                elif action in (Key.PATTERN_MENU, Key.CANCEL):
                     placement_mode = False
                 continue
 
             # --- Edit Mode Keys ---
             if edit_mode:
-                if processed_input in ('\x1b[a', repr(b'\xe0H')): # Up
+                if action == Key.UP:
                     cursor_y = max(0, cursor_y - 1)
-                elif processed_input in ('\x1b[b', repr(b'\xe0P')): # Down
+                elif action == Key.DOWN:
                     cursor_y = min(rows - 1, cursor_y + 1)
-                elif processed_input in ('\x1b[d', repr(b'\xe0K')): # Left
+                elif action == Key.LEFT:
                     cursor_x = max(0, cursor_x - 1)
-                elif processed_input in ('\x1b[c', repr(b'\xe0M')): # Right
+                elif action == Key.RIGHT:
                     cursor_x = min(cols - 1, cursor_x + 1)
-                elif processed_input == ' ': # Spacebar to toggle cell state
+                elif action == Key.SELECT: # Spacebar to toggle cell state
                     board[cursor_y][cursor_x] = not board[cursor_y][cursor_x]
                 
                 # In edit mode, we loop back to wait for the next key press
                 continue
 
             # --- Step-through ---
-            if paused and processed_input == 'n':
+            if paused and action == Key.NEXT_FRAME:
                 if history is not None: history.clear()
                 # Fall through to the next generation logic
                 pass
@@ -653,7 +729,6 @@ def run(
             # --- Proceed to next generation ---
             board = next_generation(board, torus=torus_mode)
             generation += 1
-
 
     except KeyboardInterrupt:
         max_generation = max(max_generation, generation)
