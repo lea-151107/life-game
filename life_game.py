@@ -668,7 +668,6 @@ def run(
                     elif action in (Key.PATTERN_MENU, Key.CANCEL):
                         pattern_selection_mode = False
                 continue
-                continue
 
             if placement_mode:
                 if action == Key.UP:
