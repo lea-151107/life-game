@@ -98,6 +98,7 @@ def render(
     pattern_scroll_offset: int = 0,
     search_mode: bool = False,
     search_query: str = "",
+    search_cursor_pos: int = 0,
     torus: bool = False,
 ) -> None:
     """Render the current board state to the terminal with a detailed header."""
@@ -193,7 +194,12 @@ def render(
                     output_buffer.append(f"  {name}")
 
         if search_mode:
-            output_buffer.append(f"\nSearch: /{search_query}_")
+            # Build the search string with a cursor
+            pre_cursor = search_query[:search_cursor_pos]
+            cursor_char = search_query[search_cursor_pos] if search_cursor_pos < len(search_query) else ' '
+            post_cursor = search_query[search_cursor_pos+1:]
+            search_display = f"{pre_cursor}{BG_CYAN}{cursor_char}{RESET}{post_cursor}"
+            output_buffer.append(f"\nSearch: /{search_display}")
         
         print("\n".join(output_buffer), flush=True)
         return
@@ -332,6 +338,7 @@ class Key(Enum):
     SEARCH = auto()
     BACKSPACE = auto()
     ENTER = auto()
+    DELETE = auto()
 
 # Key mapping for different platforms
 KEY_MAP = {
@@ -342,12 +349,16 @@ KEY_MAP = {
     '\x1b[c': Key.RIGHT,
     '\x1b': Key.CANCEL,
     '\x7f': Key.BACKSPACE,
+    '\x1b[3~': Key.DELETE, # Unix-like for Delete
+    '\x08': Key.BACKSPACE,   # ASCII Backspace
     # Windows (msvcrt)
     repr(b'\xe0H'): Key.UP,
     repr(b'\xe0P'): Key.DOWN,
     repr(b'\xe0K'): Key.LEFT,
     repr(b'\xe0M'): Key.RIGHT,
     repr(b'\x08'): Key.BACKSPACE,
+    repr(b'\x7f'): Key.BACKSPACE, # Windows for Backspace
+    repr(b'\xe0S'): Key.DELETE, # Windows for Delete
     # Common keys
     ' ': Key.SELECT,
     '\r': Key.ENTER,
@@ -362,10 +373,10 @@ KEY_MAP = {
     '/': Key.SEARCH,
 }
 
-def get_key(timeout: Optional[float]) -> Optional[Union[Key, str]]:
+def get_key(timeout: Optional[float], search_mode: bool = False) -> Optional[Union[Key, str]]:
     """
     Get a key press and convert it to a Key enum or a character.
-    Handles platform-specific key codes.
+    Handles platform-specific and multi-byte key codes.
     """
     user_input = None
     if os.name == "nt":
@@ -384,12 +395,15 @@ def get_key(timeout: Optional[float]) -> Optional[Union[Key, str]]:
         rlist, _, _ = select.select([sys.stdin], [], [], timeout)
         if rlist:
             user_input = sys.stdin.read(1)
+            # Check for the start of an escape sequence
             if user_input == '\x1b':
-                # Read the rest of the ANSI sequence if available
-                # This is a simplified way to handle arrow keys and might need
-                # more robust handling for other sequences.
-                if select.select([sys.stdin], [], [], 0)[0]:
-                    user_input += sys.stdin.read(2)
+                # Read subsequent characters if available, non-blockingly
+                while select.select([sys.stdin], [], [], 0)[0]:
+                    next_char = sys.stdin.read(1)
+                    user_input += next_char
+                    # Break on common sequence terminators
+                    if next_char.isalpha() or next_char == '~':
+                        break
 
     if user_input is None:
         return None
@@ -397,20 +411,21 @@ def get_key(timeout: Optional[float]) -> Optional[Union[Key, str]]:
     # Normalize input to a consistent string format
     if isinstance(user_input, bytes):
         try:
-            # For regular keys, decode to string
             processed_input = user_input.decode('utf-8').lower()
         except UnicodeDecodeError:
-            # For special keys (like arrows on Windows), use repr
             processed_input = repr(user_input)
     else:
-        # For Unix-like systems, it's already a string
         processed_input = user_input.lower()
 
-    # Check against the key map first
+    # In search mode, printable characters should be treated as input, not commands.
+    if search_mode and len(processed_input) == 1 and processed_input.isprintable():
+        return processed_input
+
+    # Check against the key map for commands
     if processed_input in KEY_MAP:
         return KEY_MAP[processed_input]
 
-    # If it's not a mapped key, return the character if it's printable
+    # If not a command, return the character if it's printable (for non-search mode)
     if len(processed_input) == 1 and processed_input.isprintable():
         return processed_input
 
@@ -462,6 +477,7 @@ def run(
     pattern_scroll_offset = 0
     search_mode = False
     search_query = ""
+    search_cursor_pos = 0
     current_pattern_data: Optional[Pattern] = None
     pattern_rotation = 0
     pattern_flip = False
@@ -535,6 +551,7 @@ def run(
                 pattern_scroll_offset,
                 search_mode,
                 search_query,
+                search_cursor_pos,
                 torus_mode,
             )
 
@@ -580,7 +597,7 @@ def run(
 
             # --- Non-blocking input handling ---
             timeout = None if is_static_mode else interval
-            action = get_key(timeout)
+            action = get_key(timeout, search_mode=search_mode)
 
             # --- Process User Input ---
             if action is None:
@@ -590,43 +607,7 @@ def run(
                     generation += 1
                 continue
 
-            # --- Game Control Keys ---
-            if action == Key.RESTART and not placement_mode:
-                max_generation = max(max_generation, generation)
-                game_no += 1
-                board = create_board(rows, cols, density)
-                generation = 0
-                last_alive_count = 0
-                paused = False
-                edit_mode = False
-                if history is not None: history.clear()
-                continue
-
-            if action == Key.PAUSE:
-                paused = not paused
-                edit_mode = False
-                placement_mode = False
-                pattern_selection_mode = False
-                if history is not None: history.clear()
-                continue
-
-            if paused and not placement_mode and not pattern_selection_mode and action == Key.EDIT:
-                edit_mode = not edit_mode
-                if history is not None: history.clear()
-                continue
-            
-            if paused and not edit_mode and not placement_mode and action == Key.PATTERN_MENU:
-                pattern_selection_mode = not pattern_selection_mode
-                placement_mode = False
-                edit_mode = False
-                continue
-
-            if action == Key.TOGGLE_TORUS:
-                torus_mode = not torus_mode
-                if history is not None: history.clear()
-                continue
-
-            # --- Pattern Selection Mode ---
+            # --- Mode-specific input handling ---
             if pattern_selection_mode:
                 # Filter patterns based on search query
                 if search_query:
@@ -641,9 +622,19 @@ def run(
 
                 if search_mode:
                     if isinstance(action, str):
-                        search_query += action
+                        search_query = search_query[:search_cursor_pos] + action + search_query[search_cursor_pos:]
+                        search_cursor_pos += len(action)
+                    elif action == Key.LEFT:
+                        search_cursor_pos = max(0, search_cursor_pos - 1)
+                    elif action == Key.RIGHT:
+                        search_cursor_pos = min(len(search_query), search_cursor_pos + 1)
                     elif action == Key.BACKSPACE:
-                        search_query = search_query[:-1]
+                        if search_cursor_pos > 0:
+                            search_query = search_query[:search_cursor_pos - 1] + search_query[search_cursor_pos:]
+                            search_cursor_pos -= 1
+                    elif action == Key.DELETE:
+                        if search_cursor_pos < len(search_query):
+                            search_query = search_query[:search_cursor_pos] + search_query[search_cursor_pos + 1:]
                     elif action == Key.ENTER:
                         search_mode = False
                     elif action == Key.CANCEL:
@@ -658,6 +649,7 @@ def run(
                     if action == Key.SEARCH:
                         search_mode = True
                         search_query = ""
+                        search_cursor_pos = 0
                     elif action == Key.UP:
                         selected_pattern_index = max(0, selected_pattern_index - 1)
                         if selected_pattern_index < pattern_scroll_offset:
@@ -676,8 +668,8 @@ def run(
                     elif action in (Key.PATTERN_MENU, Key.CANCEL):
                         pattern_selection_mode = False
                 continue
+                continue
 
-            # --- Placement Mode ---
             if placement_mode:
                 if action == Key.UP:
                     cursor_y = max(0, cursor_y - 1)
@@ -701,7 +693,6 @@ def run(
                     placement_mode = False
                 continue
 
-            # --- Edit Mode Keys ---
             if edit_mode:
                 if action == Key.UP:
                     cursor_y = max(0, cursor_y - 1)
@@ -715,6 +706,41 @@ def run(
                     board[cursor_y][cursor_x] = not board[cursor_y][cursor_x]
                 
                 # In edit mode, we loop back to wait for the next key press
+                continue
+
+            # --- Global input handling ---
+            if action == Key.RESTART:
+                max_generation = max(max_generation, generation)
+                game_no += 1
+                board = create_board(rows, cols, density)
+                generation = 0
+                last_alive_count = 0
+                paused = False
+                edit_mode = False
+                if history is not None: history.clear()
+                continue
+
+            if action == Key.PAUSE:
+                paused = not paused
+                edit_mode = False
+                placement_mode = False
+                pattern_selection_mode = False
+                if history is not None: history.clear()
+                continue
+
+            if paused and action == Key.EDIT:
+                edit_mode = True
+                if history is not None: history.clear()
+                continue
+            
+            if paused and action == Key.PATTERN_MENU:
+                pattern_selection_mode = True
+                if history is not None: history.clear()
+                continue
+
+            if action == Key.TOGGLE_TORUS:
+                torus_mode = not torus_mode
+                if history is not None: history.clear()
                 continue
 
             # --- Step-through ---
