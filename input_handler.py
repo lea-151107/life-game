@@ -18,12 +18,11 @@ class Key(Enum):
     RIGHT = auto()
     SELECT = auto()
     CANCEL = auto()
-    RESTART = auto()
     PAUSE = auto()
     EDIT = auto()
     PATTERN_MENU = auto()
     TOGGLE_TORUS = auto()
-    ROTATE = auto()
+    RESTART_AND_ROTATE = auto()
     FLIP = auto()
     NEXT_FRAME = auto()
     SEARCH = auto()
@@ -54,7 +53,7 @@ KEY_MAP = {
     ' ': Key.SELECT,
     '\r': Key.ENTER,
     '\n': Key.ENTER,
-    'r': Key.RESTART,
+    'r': Key.RESTART_AND_ROTATE,
     'p': Key.PAUSE,
     'e': Key.EDIT,
     'l': Key.PATTERN_MENU,

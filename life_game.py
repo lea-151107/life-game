@@ -278,7 +278,7 @@ def run(
                     cursor_x = max(0, cursor_x - 1)
                 elif action == Key.RIGHT:
                     cursor_x = min(cols - 1, cursor_x + 1)
-                elif action == Key.ROTATE:
+                elif action == Key.RESTART_AND_ROTATE:
                     pattern_rotation = (pattern_rotation + 90) % 360
                 elif action == Key.FLIP:
                     pattern_flip = not pattern_flip
@@ -308,7 +308,7 @@ def run(
                 continue
 
             # --- Global input handling ---
-            if action == Key.RESTART:
+            if action == Key.RESTART_AND_ROTATE:
                 max_generation = max(max_generation, generation)
                 game_no += 1
                 board = create_board(rows, cols, density)
