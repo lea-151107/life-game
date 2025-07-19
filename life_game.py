@@ -8,6 +8,8 @@ Options
 --endless    : Restart automatically with a fresh board when a Dead condition is met.
 --stagnate N : Mark as Dead if the live-cell count shows no new value for N generations
                (either all identical or an A-B-A-B… two-value alternation).
+--create     : Launch the pattern editor.
+
 Press 'R' to restart the game.
 Press Ctrl-C to quit at any time.
 """
@@ -27,11 +29,65 @@ if os.name != "nt":
     import tty
 
 from core import create_board, next_generation, is_cyclical
-from rendering import render, render_results
-from input_handler import get_key, Key
+from rendering import render, render_results, render_editor
+from input_handler import get_key, Key, get_string_input
 from patterns import PATTERN_LIBRARY, Pattern
-from utils import rotate_pattern, flip_pattern
+from utils import rotate_pattern, flip_pattern, extract_pattern_from_board, save_pattern_to_library
 
+
+def run_pattern_editor(rows: int, cols: int) -> None:
+    """Run the interactive pattern editor."""
+    board = [[False] * cols for _ in range(rows)]
+    cursor_y, cursor_x = rows // 2, cols // 2
+    message = "Draw your pattern. Press Enter to save."
+
+    old_settings = None
+    if os.name != "nt":
+        old_settings = termios.tcgetattr(sys.stdin)
+        tty.setcbreak(sys.stdin.fileno())
+
+    try:
+        while True:
+            render_editor(board, rows, cols, cursor_y, cursor_x, message)
+            action = get_key(timeout=None)
+
+            if action == Key.UP:
+                cursor_y = max(0, cursor_y - 1)
+            elif action == Key.DOWN:
+                cursor_y = min(rows - 1, cursor_y + 1)
+            elif action == Key.LEFT:
+                cursor_x = max(0, cursor_x - 1)
+            elif action == Key.RIGHT:
+                cursor_x = min(cols - 1, cursor_x + 1)
+            elif action == Key.SELECT:
+                board[cursor_y][cursor_x] = not board[cursor_y][cursor_x]
+            elif action == Key.CANCEL:
+                print("Pattern creation cancelled.")
+                break
+            elif action == Key.ENTER:
+                pattern = extract_pattern_from_board(board)
+                if not pattern:
+                    message = "Pattern is empty. Cannot save."
+                    continue
+
+                render_editor(board, rows, cols, -1, -1, "Enter pattern name: ")
+                pattern_name = get_string_input()
+
+                if not pattern_name:
+                    print("\nPattern name cannot be empty. Aborting.")
+                    time.sleep(2)
+                    continue
+
+                if save_pattern_to_library(pattern_name, pattern):
+                    print(f"\nPattern '{pattern_name}' saved successfully!")
+                else:
+                    print("\nError: Could not save the pattern.")
+                time.sleep(2)
+                break
+
+    finally:
+        if os.name != "nt" and old_settings:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
 # ──────────────────────────────────────────────────────────────
 #  Main loop
@@ -377,27 +433,27 @@ def main() -> None:
         "--rows",
         type=int,
         default=20,
-        help="Number of rows.\n"
+        help="Number of rows for simulation or editor.\n"
     )
     parser.add_argument(
         "-c",
         "--cols",
         type=int,
         default=40,
-        help="Number of columns.\n"
+        help="Number of columns for simulation or editor.\n"
     )
     parser.add_argument(
         "-d",
         "--density",
         type=float,
         default=0.2,
-        help="Initial live-cell density (0–1).\n"
+        help="Initial live-cell density (0–1) for simulation.\n"
     )
     parser.add_argument(
         "-i", "--interval",
         type=float,
         default=0.2,
-        help="Delay between generations (seconds).\n"
+        help="Delay between generations (seconds) for simulation.\n"
     )
     parser.add_argument(
         "--max",
@@ -405,9 +461,14 @@ def main() -> None:
         help="Fit the board to the current terminal size (overrides rows and columns).\n",
     )
     parser.add_argument(
+        "--create",
+        action="store_true",
+        help="Launch the pattern editor instead of the simulation.\n",
+    )
+    parser.add_argument(
         "--torus",
         action="store_true",
-        help="Enable torus mode (wraparound edges).\n",
+        help="Enable torus mode (wraparound edges) for simulation.\n",
     )
     parser.add_argument(
         "--endless",
@@ -454,34 +515,35 @@ def main() -> None:
         ),
     )
 
-    # All argument parsing and pre-run logic is wrapped in a try block
-    # to gracefully handle KeyboardInterrupt (Ctrl+C) during setup.
     try:
-        colorama_init()  # Initialize colorama for cross-platform ANSI support
+        colorama_init()
         args = parser.parse_args()
-
-        # --- Header items validation ---
-        VALID_HEADER_KEYWORDS = {
-            "mode", "size", "interval", "game", "gen", "alive", "density", "fps"
-        }
-        if args.header_items:
-            # Split by comma, strip whitespace, convert to lower, and remove empty strings
-            user_keywords = {
-                item.strip().lower() for item in args.header_items.split(',') if item.strip()
-            }
-            # Find the difference between user's keywords and valid keywords
-            invalid_keywords = user_keywords - VALID_HEADER_KEYWORDS
-            if invalid_keywords:
-                # Sort for consistent and readable error messages
-                sorted_invalid = ", ".join(sorted(list(invalid_keywords)))
-                sys.exit(f"Error: Invalid keyword(s) in --header-items: {sorted_invalid}")
 
         if len(args.live_cell) != 1:
             sys.exit("Error: --live-cell must be a single character.")
         if len(args.dead_cell) != 1:
             sys.exit("Error: --dead-cell must be a single character.")
 
-        # --- Stagnate value validation ---
+        rows, cols = args.rows, args.cols
+        if args.max:
+            term_size = shutil.get_terminal_size(fallback=(80, 24))
+            rows = max(1, term_size.lines - 4)
+            cols = max(1, term_size.columns)
+
+        if args.create:
+            run_pattern_editor(rows, cols)
+            sys.exit(0)
+
+        VALID_HEADER_KEYWORDS = {
+            "mode", "size", "interval", "game", "gen", "alive", "density", "fps"
+        }
+        if args.header_items:
+            user_keywords = {item.strip().lower() for item in args.header_items.split(',') if item.strip()}
+            invalid_keywords = user_keywords - VALID_HEADER_KEYWORDS
+            if invalid_keywords:
+                sorted_invalid = ", ".join(sorted(list(invalid_keywords)))
+                sys.exit(f"Error: Invalid keyword(s) in --header-items: {sorted_invalid}")
+
         effective_stagnate = args.stagnate
         if 0 < args.stagnate < 5:
             print(
@@ -493,16 +555,9 @@ def main() -> None:
             effective_stagnate = 5
             time.sleep(5)
 
-        # Override size with current terminal dimensions if requested
-        if args.max:
-            term_size = shutil.get_terminal_size(fallback=(80, 24))  # (columns, lines)
-            # Reserve three lines for the header and separator
-            args.rows = max(1, term_size.lines - 4)
-            args.cols = max(1, term_size.columns)
-
         run(
-            rows=args.rows,
-            cols=args.cols,
+            rows=rows,
+            cols=cols,
             density=args.density,
             interval=args.interval,
             endless=args.endless,
@@ -514,8 +569,7 @@ def main() -> None:
             torus=args.torus,
         )
     except KeyboardInterrupt:
-        # Catch Ctrl+C during the argument parsing or the 5-second wait
-        print("\nInterrupted during setup. Exiting.", file=sys.stderr)
+        print("\nInterrupted. Exiting.", file=sys.stderr)
         sys.exit(0)
 
 

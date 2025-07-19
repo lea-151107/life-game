@@ -1,6 +1,7 @@
 from typing import List, Tuple
 
 Pattern = List[Tuple[int, int]]
+CellGrid = List[List[bool]]  # True = alive, False = dead
 
 PATTERN_LIBRARY: dict[str, Pattern] = {
     "Blinker": [(0, 0), (0, 1), (0, 2)],
@@ -16,5 +17,5 @@ PATTERN_LIBRARY: dict[str, Pattern] = {
         (5, 0), (5, 1), (5, 10), (5, 14), (5, 16), (5, 17), (5, 22),
         (5, 24), (6, 10), (6, 16), (6, 24), (7, 11), (7, 15), (8, 12),
         (8, 13)
-    ]
+    ],
 }

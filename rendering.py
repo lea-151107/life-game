@@ -187,3 +187,33 @@ def render_results(game_no: int, max_generation: int) -> None:
     for stat in stats:
         print(f"│ {stat.ljust(width)} │")
     print(f"└{'─' * (width + 2)}┘")
+
+def render_editor(board: CellGrid, rows: int, cols: int, cursor_y: int, cursor_x: int, message: str) -> None:
+    """Render the pattern editor UI."""
+    output_buffer = []
+    output_buffer.append("\x1b[H\x1b[J")  # Clear screen
+
+    BG_CYAN = "\x1b[46m"
+    RESET = "\x1b[0m"
+    LIVE_CELL = "■"
+    DEAD_CELL = " "
+
+    title = "Pattern Editor"
+    output_buffer.append(title)
+    output_buffer.append("-" * len(title))
+
+    for r, row in enumerate(board):
+        line_parts = []
+        for c, cell in enumerate(row):
+            char_to_render = LIVE_CELL if cell else DEAD_CELL
+            if r == cursor_y and c == cursor_x:
+                line_parts.append(f"{BG_CYAN}{char_to_render}{RESET}")
+            else:
+                line_parts.append(char_to_render)
+        output_buffer.append("".join(line_parts))
+    
+    output_buffer.append("-" * cols)
+    output_buffer.append(message)
+    output_buffer.append("Move:↑/↓/←/→ | Toggle: Space | Save: Enter | Quit: Esc")
+
+    print("\n".join(output_buffer), flush=True)

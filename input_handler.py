@@ -120,3 +120,27 @@ def get_key(timeout: Optional[float], search_mode: bool = False) -> Optional[Uni
         return processed_input
 
     return None
+
+def get_string_input() -> str:
+    """Reads user input until Enter is pressed, returns the final string."""
+    if os.name == 'nt':
+        chars = []
+        while True:
+            char = msvcrt.getwch()
+            if char == '\r' or char == '\n':  # Enter key
+                break
+            elif char == '\x08':  # Backspace
+                if chars:
+                    chars.pop()
+                    # Erase the character from the console
+                    msvcrt.putwch('\x08')
+                    msvcrt.putwch(' ')
+                    msvcrt.putwch('\x08')
+            else:
+                chars.append(char)
+                msvcrt.putwch(char)  # Echo character
+        return "".join(chars)
+    else:  # Unix-like
+        # This is a simplified approach. A more robust solution might
+        # handle individual characters for real-time feedback.
+        return sys.stdin.readline().strip()
