@@ -1,5 +1,8 @@
-from typing import List
-from patterns import Pattern, CellGrid
+import json
+from typing import List, Tuple
+
+Pattern = List[Tuple[int, int]]
+CellGrid = List[List[bool]]
 
 def rotate_pattern(pattern: Pattern, angle: int) -> Pattern:
     """Rotate a pattern by a given angle (90, 180, 270 degrees)."""
@@ -45,31 +48,13 @@ def extract_pattern_from_board(board: CellGrid) -> Pattern:
 
     return [(r - min_r, c - min_c) for r, c in live_cells]
 
-def save_pattern_to_library(name: str, pattern: Pattern) -> bool:
-    """Appends a new pattern to the PATTERN_LIBRARY in patterns.py."""
+def save_pattern_to_library(name: str, pattern: Pattern, library: dict) -> bool:
+    """Adds a pattern to the library and saves it to the JSON file."""
+    library[name] = pattern
     try:
-        with open("patterns.py", "r+", encoding="utf-8") as f:
-            lines = f.readlines()
-            
-            # Find the end of the dictionary
-            for i, line in reversed(list(enumerate(lines))):
-                if "}" in line:
-                    closing_brace_line = i
-                    break
-            else:
-                return False # Dictionary end not found
-
-            # Format the new pattern entry
-            new_pattern_str = f'    "{name}": {pattern},\n'
-
-            # Insert the new pattern before the closing brace
-            lines.insert(closing_brace_line, new_pattern_str)
-
-            # Go back to the beginning of the file and write the modified lines
-            f.seek(0)
-            f.writelines(lines)
-            f.truncate()
+        with open("patterns.json", "w", encoding="utf-8") as f:
+            json.dump(library, f, indent=4)
         return True
-    except (IOError, IndexError, UnicodeEncodeError):
+    except (IOError, TypeError):
         return False
 

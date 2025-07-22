@@ -1,7 +1,7 @@
 import random
 from typing import List
 
-CellGrid = List[List[bool]]  # True = alive, False = dead
+from utils import CellGrid
 
 def next_generation(board: CellGrid, torus: bool = False) -> CellGrid:
     """Return the next generation according to Conway's rules."""

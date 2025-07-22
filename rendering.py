@@ -1,7 +1,6 @@
 from typing import List, Optional
 
-from core import CellGrid
-from patterns import Pattern
+from utils import CellGrid, Pattern
 
 def render(
     board: CellGrid,

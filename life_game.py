@@ -14,13 +14,30 @@ Press 'R' to restart the game.
 Press Ctrl-C to quit at any time.
 """
 
+#!/usr/bin/env python3
+"""
+Terminal Conway's Game of Life
+──────────────────────────────
+Options
+-------
+--max        : Fit the board to the current terminal window.
+--endless    : Restart automatically with a fresh board when a Dead condition is met.
+--stagnate N : Mark as Dead if the live-cell count shows no new value for N generations
+               (either all identical or an A-B-A-B… two-value alternation).
+--create     : Launch the pattern editor.
+
+Press 'R' to restart the game.
+Press Ctrl-C to quit at any time.
+"""
+
 import argparse
+import json
 import os
 import shutil
 import sys
 import time
 from collections import deque
-from typing import Deque, Optional
+from typing import Deque, Optional, Dict
 
 from colorama import init as colorama_init
 
@@ -31,9 +48,18 @@ if os.name != "nt":
 from core import create_board, next_generation, is_cyclical
 from rendering import render, render_results, render_editor
 from input_handler import get_key, Key, get_string_input
-from patterns import PATTERN_LIBRARY, Pattern
-from utils import rotate_pattern, flip_pattern, extract_pattern_from_board, save_pattern_to_library
+from utils import Pattern, rotate_pattern, flip_pattern, extract_pattern_from_board, save_pattern_to_library
 
+PATTERN_LIBRARY: Dict[str, Pattern] = {}
+
+def load_patterns() -> None:
+    """Load patterns from the JSON file into the global library."""
+    global PATTERN_LIBRARY
+    try:
+        with open("patterns.json", "r", encoding="utf-8") as f:
+            PATTERN_LIBRARY = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        PATTERN_LIBRARY = {}
 
 def run_pattern_editor(rows: int, cols: int) -> None:
     """Run the interactive pattern editor."""
@@ -78,7 +104,7 @@ def run_pattern_editor(rows: int, cols: int) -> None:
                     time.sleep(2)
                     continue
 
-                if save_pattern_to_library(pattern_name, pattern):
+                if save_pattern_to_library(pattern_name, pattern, PATTERN_LIBRARY):
                     print(f"\nPattern '{pattern_name}' saved successfully!")
                 else:
                     print("\nError: Could not save the pattern. Invalid characters may have been used.")
@@ -517,6 +543,7 @@ def main() -> None:
 
     try:
         colorama_init()
+        load_patterns()
         args = parser.parse_args()
 
         if len(args.live_cell) != 1:
