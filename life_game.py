@@ -81,7 +81,7 @@ def run_pattern_editor(rows: int, cols: int) -> None:
                 if save_pattern_to_library(pattern_name, pattern):
                     print(f"\nPattern '{pattern_name}' saved successfully!")
                 else:
-                    print("\nError: Could not save the pattern.")
+                    print("\nError: Could not save the pattern. Invalid characters may have been used.")
                 time.sleep(2)
                 break
 

@@ -48,7 +48,7 @@ def extract_pattern_from_board(board: CellGrid) -> Pattern:
 def save_pattern_to_library(name: str, pattern: Pattern) -> bool:
     """Appends a new pattern to the PATTERN_LIBRARY in patterns.py."""
     try:
-        with open("patterns.py", "r+") as f:
+        with open("patterns.py", "r+", encoding="utf-8") as f:
             lines = f.readlines()
             
             # Find the end of the dictionary
@@ -70,5 +70,6 @@ def save_pattern_to_library(name: str, pattern: Pattern) -> bool:
             f.writelines(lines)
             f.truncate()
         return True
-    except (IOError, IndexError):
+    except (IOError, IndexError, UnicodeEncodeError):
         return False
+
